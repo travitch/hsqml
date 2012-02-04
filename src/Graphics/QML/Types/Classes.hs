@@ -68,6 +68,9 @@ import Foreign.Marshal.Array
 import System.IO.Unsafe
 import Numeric
 
+import Debug.Trace
+debug = flip trace
+
 --
 -- MetaObject
 --
@@ -421,14 +424,14 @@ writeInt int = do
 -- | Write a string into the stringdata section and record its index
 -- in the mData table.  If the string already exists, simply look up
 -- its cached index.
-writeString :: String -> State MOCState ()
+writeString :: String -> State MOCState CUInt
 writeString str = do
   st <- get
   let msd    = mStrData st
       msdLen = mStrDataLen st
       msdMap = mStrDataMap st
   case (Map.lookup str msdMap) of
-    Just idx -> writeInt idx
+    Just idx -> writeInt idx >> return idx
     Nothing  -> do
       let idx = fromIntegral msdLen
           msd' = 0 : (map castCharToCChar (reverse str) ++ msd)
@@ -439,6 +442,7 @@ writeString str = do
              , mStrDataMap = msdMap'
              }
       writeInt idx
+      return idx
 
 -- | Append a 'Method' into the methods index in the mData table.
 -- Each entry has 5 components: signature, parameters, type, tag,
@@ -452,9 +456,9 @@ writeString str = do
 writeMethod :: Method tt -> State MOCState ()
 writeMethod m = do
   idx <- get >>= return . mDataLen
-  writeString $ methodSignature m
-  writeString $ methodParameters m
-  writeString $ typeName $ head $ methodTypes m
+  _ <- writeString $ methodSignature m
+  _ <- writeString $ methodParameters m
+  _ <- writeString $ typeName $ head $ methodTypes m
   writeInt mfAccessPublic
   st <- get
   put st { mDataMethodsIdx = mplus (mDataMethodsIdx st) (Just idx) }
@@ -465,9 +469,16 @@ writeMethod m = do
 writeProperty :: Property tt -> State MOCState ()
 writeProperty p = do
   idx <- get >>= return . mDataLen
-  writeString $ propertyName p
-  writeString $ typeName $ propertyType p
-  writeInt (foldr (.|.) 0 (propertyFlags p))
+  _ <- writeString $ propertyName p
+  tyIdx <- writeString $ typeName $ propertyType p
+  -- The property flags are ORed with something and shifted left 24
+  -- bits.  According to the moc source, the value is
+  -- qvariant_nameToType; I'm not sure exactly what is going on there
+  -- and it doesn't seem to affect functionality.  This could be
+  -- changed a bit later... there are some hard-coded values in moc
+  -- and otherwise there is some computation by QMetaType::type.
+  let flags = foldr (.|.) pfInvalid (propertyFlags p)
+  writeInt flags
   st <- get
   put st { mDataPropsIdx = mplus (mDataPropsIdx st) (Just idx) }
   return ()
@@ -480,7 +491,7 @@ compileClass :: String -> [Method tt] -> [Property tt] -> MOCOutput
 compileClass name ms ps =
   let enc = flip execState newMOCState $ do
         writeInt 5                           -- Revision (Qt 4.7)
-        writeString name                     -- Class name
+        _ <- writeString name                     -- Class name
         writeInt 0 >> writeInt 0             -- Class info
         writeInt $ fromIntegral $ length ms  -- Methods
         writeInt $ fromIntegral $
