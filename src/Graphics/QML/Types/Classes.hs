@@ -52,6 +52,7 @@ import Graphics.QML.Internal.Classes
 
 import Control.Monad
 import Control.Monad.Trans.State
+import Data.Bits
 import Data.Map ( Map )
 import qualified Data.Map as Map
 import Data.IntMap ( IntMap )
@@ -291,6 +292,7 @@ data Property tt =
            , propertyType :: TypeName
            , propertyReadFunc :: UniformFunc
            , propertyWriteFunc :: Maybe UniformFunc
+           , propertyFlags :: [CUInt]
            }
 
 -- | Helper to monadically define properties
@@ -308,6 +310,7 @@ defPropertyRO name g =
                        , propertyType = mTypeOf (undefined :: tr)
                        , propertyReadFunc = marshalFunc0 accessor
                        , propertyWriteFunc = Nothing
+                       , propertyFlags = [pfScriptable, pfReadable, pfStored]
                        }
   where
     accessor p0 pr = unmarshal p0 >>= g >>= marshal pr
@@ -324,6 +327,7 @@ defPropertyRW name g s =
                        , propertyType = mTypeOf (undefined :: tr)
                        , propertyReadFunc = marshalFunc0 accessor
                        , propertyWriteFunc = Just (marshalFunc1 writer)
+                       , propertyFlags = [pfScriptable, pfReadable, pfWritable, pfStored]
                        }
   where
     accessor p0 pr = unmarshal p0 >>= g >>= marshal pr
@@ -458,15 +462,12 @@ writeMethod m = do
 
 -- | Write a property into the property table of mData.  Each
 -- component has three fields: name, type, flags.
---
--- FIXME: Pull flags out of the Property and compute them with
--- Data.Bits
 writeProperty :: Property tt -> State MOCState ()
 writeProperty p = do
   idx <- get >>= return . mDataLen
   writeString $ propertyName p
   writeString $ typeName $ propertyType p
-  writeInt 0x0a095001 -- FIXME
+  writeInt (foldr (.|.) 0 (propertyFlags p))
   st <- get
   put st { mDataPropsIdx = mplus (mDataPropsIdx st) (Just idx) }
   return ()
