@@ -84,6 +84,7 @@ data MetaClass tt = MetaClass {
 metaClassDb :: forall a. IORef (IntMap (MetaClass a))
 metaClassDb = unsafePerformIO $ newIORef IntMap.empty
 
+{-# NOINLINE metaClass #-}
 metaClass :: forall tt. (MetaObject tt) => MetaClass tt
 metaClass = unsafePerformIO $ do
   let typ  = typeOf (undefined :: tt)
@@ -101,7 +102,10 @@ metaClass = unsafePerformIO $ do
 createClass :: forall tt. (MetaObject tt) =>
   String -> DefClass tt () -> IO (MetaClass tt)
 createClass name (DefClass methods properties _) = do
+  mapM_ (putStrLn . propertyName) properties
   let (MOCOutput metaData metaStrData) = compileClass name methods properties
+  print metaData
+  putStrLn (map castCCharToChar metaStrData)
   metaDataPtr <- newArray metaData
   metaStrDataPtr <- newArray metaStrData
   methodsPtr <- mapM (marshalFunc . methodFunc) methods >>= newArray
@@ -211,13 +215,16 @@ defProperty p = DefClass [] [p] ()
 
 -- | Defines a named read-only property using an impure
 -- accessor function.
-defPropertyRO ::
-  forall tt tr. (MetaObject tt, Marshallable tr) =>
-  String -> (tt -> IO tr) -> DefClass tt ()
-defPropertyRO name g = defProperty $ Property name
-  (mTypeOf (undefined :: tr))
-  (marshalFunc0 $ \p0 pr -> unmarshal p0 >>= g >>= marshal pr)
-  Nothing
+defPropertyRO :: forall tt tr. (MetaObject tt, Marshallable tr)
+                 => String
+                 -> (tt -> IO tr)
+                 -> DefClass tt ()
+defPropertyRO name g =
+  defProperty Property { propertyName = name
+                       , propertyType = (mTypeOf (undefined :: tr))
+                       , propertyReadFunc = (marshalFunc0 $ \p0 pr -> unmarshal p0 >>= g >>= marshal pr)
+                       , propertyWriteFunc = Nothing
+                       }
 
 -- | Defines a named read-write property using a pair of
 -- impure accessor and mutator functions.
@@ -327,7 +334,7 @@ writeProperty p = do
   idx <- get >>= return . mDataLen
   writeString $ propertyName p
   writeString $ typeName $ propertyType p
-  writeInt 0 -- FIXME
+  writeInt 0x0a095001 -- FIXME
   st <- get
   put $ st {mDataPropsIdx = mplus (mDataPropsIdx st) (Just idx)}
   return ()
