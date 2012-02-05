@@ -55,8 +55,6 @@ import Control.Monad.Trans.State
 import Data.Bits
 import Data.Map ( Map )
 import qualified Data.Map as Map
-import Data.IntMap ( IntMap )
-import qualified Data.IntMap as IntMap
 import Data.Maybe
 import Data.IORef
 import Data.Typeable
@@ -66,10 +64,6 @@ import Foreign.Ptr
 import Foreign.Storable
 import Foreign.Marshal.Array
 import System.IO.Unsafe
-import Numeric
-
-import Debug.Trace
-debug = flip trace
 
 --
 -- MetaObject
@@ -118,8 +112,8 @@ data MetaClass tt = MetaClass { classType :: TypeName
 -- | This is a global lookup table mapping keys to MetaClass objects.
 -- The Int keys are computed from types using Data.Typeable (allowing
 -- information recovery from the existential).
-metaClassDb :: forall a. IORef (IntMap (MetaClass a))
-metaClassDb = unsafePerformIO $ newIORef IntMap.empty
+metaClassDb :: forall a. IORef (Map TypeRep (MetaClass a))
+metaClassDb = unsafePerformIO $ newIORef Map.empty
 
 {-# NOINLINE metaClass #-}
 -- | Creates a new metaclass and adds it to the global 'metaClassDb'.
@@ -128,15 +122,16 @@ metaClassDb = unsafePerformIO $ newIORef IntMap.empty
 metaClass :: forall tt. (MetaObject tt) => MetaClass tt
 metaClass = unsafePerformIO $ do
   let typ  = typeOf (undefined :: tt)
-      name = tyConString $ typeRepTyCon typ
+      name = tyConName $ typeRepTyCon typ
       def  = classDef :: DefClass tt ()
-  key <- typeRepKey typ
+--  key <- typeRepKey typ
   db  <- readIORef metaClassDb
-  case IntMap.lookup key db of
+  case Map.lookup typ db of
     Just mClass -> return mClass
     Nothing     -> do
-      mClass <- createClass (name ++ showInt key "") def
-      writeIORef metaClassDb $ IntMap.insert key mClass db
+      -- mClass <- createClass (name ++ showInt key "") def
+      mClass <- createClass (name ++ showsTypeRep typ "") def
+      writeIORef metaClassDb $ Map.insert typ mClass db
       return mClass
 
 -- | This is a helper to convert a DefClass (defined in MetaObject
@@ -424,14 +419,14 @@ writeInt int = do
 -- | Write a string into the stringdata section and record its index
 -- in the mData table.  If the string already exists, simply look up
 -- its cached index.
-writeString :: String -> State MOCState CUInt
+writeString :: String -> State MOCState ()
 writeString str = do
   st <- get
   let msd    = mStrData st
       msdLen = mStrDataLen st
       msdMap = mStrDataMap st
   case (Map.lookup str msdMap) of
-    Just idx -> writeInt idx >> return idx
+    Just idx -> writeInt idx
     Nothing  -> do
       let idx = fromIntegral msdLen
           msd' = 0 : (map castCharToCChar (reverse str) ++ msd)
@@ -442,7 +437,6 @@ writeString str = do
              , mStrDataMap = msdMap'
              }
       writeInt idx
-      return idx
 
 -- | Append a 'Method' into the methods index in the mData table.
 -- Each entry has 5 components: signature, parameters, type, tag,
@@ -456,9 +450,9 @@ writeString str = do
 writeMethod :: Method tt -> State MOCState ()
 writeMethod m = do
   idx <- get >>= return . mDataLen
-  _ <- writeString $ methodSignature m
-  _ <- writeString $ methodParameters m
-  _ <- writeString $ typeName $ head $ methodTypes m
+  writeString $ methodSignature m
+  writeString $ methodParameters m
+  writeString $ typeName $ head $ methodTypes m
   writeInt mfAccessPublic
   st <- get
   put st { mDataMethodsIdx = mplus (mDataMethodsIdx st) (Just idx) }
@@ -469,8 +463,8 @@ writeMethod m = do
 writeProperty :: Property tt -> State MOCState ()
 writeProperty p = do
   idx <- get >>= return . mDataLen
-  _ <- writeString $ propertyName p
-  tyIdx <- writeString $ typeName $ propertyType p
+  writeString $ propertyName p
+  writeString $ typeName $ propertyType p
   -- The property flags are ORed with something and shifted left 24
   -- bits.  According to the moc source, the value is
   -- qvariant_nameToType; I'm not sure exactly what is going on there
@@ -491,7 +485,7 @@ compileClass :: String -> [Method tt] -> [Property tt] -> MOCOutput
 compileClass name ms ps =
   let enc = flip execState newMOCState $ do
         writeInt 5                           -- Revision (Qt 4.7)
-        _ <- writeString name                     -- Class name
+        writeString name                     -- Class name
         writeInt 0 >> writeInt 0             -- Class info
         writeInt $ fromIntegral $ length ms  -- Methods
         writeInt $ fromIntegral $

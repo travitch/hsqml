@@ -1,7 +1,4 @@
-{-# LANGUAGE
-    TypeSynonymInstances
-  #-}
-
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 -- | Intrinsic types which can marshalled between Haskell and QML.
 module Graphics.QML.Types.Intrinsics (
   Marshallable,
