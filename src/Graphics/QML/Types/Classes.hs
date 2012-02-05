@@ -453,6 +453,9 @@ writeMethod m = do
   writeString $ methodSignature m
   writeString $ methodParameters m
   writeString $ typeName $ head $ methodTypes m
+  -- This is the tag field; it isn't clear exactly what it is supposed
+  -- to be, but making it equal to the type seems to work.
+  writeString $ typeName $ head $ methodTypes m
   writeInt mfAccessPublic
   st <- get
   put st { mDataMethodsIdx = mplus (mDataMethodsIdx st) (Just idx) }
