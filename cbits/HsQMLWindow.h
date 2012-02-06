@@ -2,42 +2,37 @@
 #define HSQML_WINDOW_H
 
 #include <QMainWindow>
-#include <QDeclarativeContext>
-#include <QDeclarativeItem>
-#include <QGraphicsScene>
-#include <QGraphicsView>
+// #include <QDeclarativeContext>
+// #include <QDeclarativeItem>
+// #include <QGraphicsScene>
+#include <QDeclarativeView>
 #include <QUrl>
 
 #include "HsQMLManager.h"
 
-class QDeclarativeComponent;
+//class QDeclarativeComponent;
 
-class HsQMLWindow : public QObject
+class HsQMLWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    HsQMLWindow(HsQMLEngine*);
-    virtual ~HsQMLWindow();
-    QUrl source() const;
-    void setSource(const QUrl&);
-    Q_PROPERTY(QUrl source READ source WRITE setSource);
-    QString title() const;
-    void setTitle(const QString&);
-    Q_PROPERTY(QString title READ title WRITE setTitle);
-    bool visible() const;
-    void setVisible(bool);
-    Q_PROPERTY(bool visible READ visible WRITE setVisible);
+  HsQMLWindow(QObject*, const QUrl&);
+  virtual ~HsQMLWindow();
+  QUrl source() const;
+  void setSource(const QUrl&);
+  Q_PROPERTY(QUrl source READ source WRITE setSource);
+
+  QDeclarativeEngine* engine() const;
+  Q_PROPERTY(QDeclarativeEngine* engine READ engine);
 
 private:
-    Q_SLOT void completeSetSource();
-    HsQMLEngine* mEngine;
-    QDeclarativeContext mContext;
-    QMainWindow mWindow;
-    QGraphicsScene mScene;
-    QGraphicsView mView;
-    QUrl mSource;
-    QDeclarativeComponent* mComponent;
+//  HsQMLEngine* mEngine;
+//  QDeclarativeContext mContext;
+  QDeclarativeView mView;
+  QUrl mSource;
+//  QDeclarativeComponent* mComponent;
+//  QSize mInitialSize;
 };
 
 #endif /*HSQML_WINDOW_H*/

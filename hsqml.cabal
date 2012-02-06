@@ -39,14 +39,12 @@ Library
   Cc-options: -std=c++0x
   C-sources:
     cbits/HsQMLClass.cpp
-    cbits/HsQMLEngine.cpp
     cbits/HsQMLIntrinsics.cpp
     cbits/HsQMLManager.cpp
     cbits/HsQMLObject.cpp
     cbits/HsQMLWindow.cpp
   Include-dirs: cbits
   X-moc-headers:
-    cbits/HsQMLEngine.h
     cbits/HsQMLManager.h
     cbits/HsQMLWindow.h
   X-separate-cbits: True

@@ -1,16 +1,16 @@
 #include <QMetaType>
+#include <QDeclarativeContext>
 
 #include "HsQMLManager.h"
+#include "HsQMLWindow.h"
 
-QMutex gMutex;
-HsQMLManager* gManager;
+static QMutex gMutex;
+static HsQMLManager* gManager;
 
-void HsQMLInitImpl()
+static void HsQMLInitImpl()
 {
   gMutex.lock();
   if (!gManager) {
-    qRegisterMetaType<HsQMLEngineConfig>("HsQMLEngineConfig");
-
     int* argcp = new int[1];
     *argcp = 1;
     char** argv = new char*[1];
@@ -19,6 +19,13 @@ void HsQMLInitImpl()
     gManager = new HsQMLManager(*argcp, argv);
   }
   gMutex.unlock();
+}
+
+static void HsQMLInit()
+{
+  if (!gManager) {
+    HsQMLInitImpl();
+  }
 }
 
 HsQMLManager::HsQMLManager(int& argc, char** argv)
@@ -35,13 +42,21 @@ void HsQMLManager::run()
     mApp.exec();
 }
 
-void HsQMLManager::createEngine(HsQMLEngineConfig config)
+void HsQMLManager::createEngine(QObject *globalObject, const QUrl &url)
 {
-  mEngines.push_back(new HsQMLEngine(config));
+  mWindows.push_back(new HsQMLWindow(globalObject, url));
 }
 
 extern "C" void hsqml_run()
 {
   HsQMLInit();
   gManager->run();
+}
+
+extern "C" void hsqml_create_engine(void* globalObject, const char* initialURL)
+{
+  QUrl url = QUrl(QString(initialURL));
+
+  HsQMLInit();
+  gManager->createEngine((QObject*)globalObject, url);
 }

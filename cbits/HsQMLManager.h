@@ -7,35 +7,28 @@
 #include <QUrl>
 
 #include "hsqml.h"
-#include "HsQMLEngine.h"
+//#include "HsQMLEngine.h"
 
 class HsQMLWindow;
 
 class HsQMLManager : public QObject
 {
-    Q_OBJECT
+  Q_OBJECT
 
 public:
-    HsQMLManager(int& argc, char** argv);
-    ~HsQMLManager();
-    void run();
-    Q_SLOT void createEngine(HsQMLEngineConfig);
+  HsQMLManager(int& argc, char** argv);
+  ~HsQMLManager();
+  void run();
+  Q_SLOT void createEngine(QObject*, const QUrl&);
 
 private:
-    QApplication mApp;
-    QMutex mMutex;
-    QVector<HsQMLEngine*> mEngines;
+  QApplication mApp;
+  QMutex mMutex;
+  QVector<HsQMLWindow*> mWindows;
+  //QVector<HsQMLEngine*> mEngines;
 };
 
-extern QMutex gMutex;
-extern HsQMLManager* gManager;
-extern void HsQMLInitImpl();
-
-static inline void HsQMLInit()
-{
-  if (!gManager) {
-    HsQMLInitImpl();
-  }
-}
+// extern QMutex gMutex;
+// extern HsQMLManager* gManager;
 
 #endif /*HSQML_MANAGER_H*/

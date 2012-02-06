@@ -11,7 +11,7 @@ import Foreign.Ptr
 
 #include "hsqml.h"
 
-{#fun unsafe hsqml_create_engine as ^
+{#fun hsqml_create_engine as ^
   {id `Ptr ()',
    `String'} ->
   `()' #}
