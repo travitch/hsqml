@@ -148,7 +148,7 @@ metaClass = unsafePerformIO $ do
     Just mClass -> return mClass
     Nothing     -> do
       -- mClass <- createClass (name ++ showInt key "") def
-      mClass <- createClass (name ++ showsTypeRep typ "") def
+      mClass <- createClass name {-(name ++ showsTypeRep typ "")-} def
       writeIORef metaClassDb $ Map.insert typ mClass db
 
       let placementFunc place = do
@@ -187,7 +187,11 @@ createClass name (DefClass methods properties _) = do
   metaStrDataPtr <- newArray metaStrData
   methodsPtr <- mapM (marshalFunc . methodFunc) methods >>= newArray
   pReads <- mapM (marshalFunc . propertyReadFunc) properties
-  pWrites <- mapM (fromMaybe (return nullFunPtr) . fmap marshalFunc . propertyWriteFunc) properties
+  let trWr p = case propertyWriteFunc p of
+        Nothing -> return nullFunPtr
+        Just w -> marshalFunc w
+  pWrites <- mapM trWr properties
+--  pWrites <- mapM (fromMaybe (return nullFunPtr) . fmap marshalFunc . propertyWriteFunc) properties
   -- The array of accessors and mutators is arranged such that the
   -- read and write functions for a given property are adjacent in the
   -- array, so we do the interleaving step here.
@@ -346,6 +350,14 @@ defPropertyRO name g =
 
 -- | Defines a named read-write property using a pair of
 -- impure accessor and mutator functions.
+--
+-- Note: the original code used marshalFunc1 for the property writing
+-- function.  This makes sense logically, but the layout of the args
+-- array (the pv argument in the function marshallers) for property
+-- writes is unusual.  Instead of being [retVal, arg1, arg2, ..], it
+-- is just [arg1] since there is never a return value for property
+-- writes.  This means that the writer function has to be marshalled
+-- with marshalFunc0 here.
 defPropertyRW :: forall tt tr. (MetaObject tt, Marshallable tr)
                  => String -- ^ Property name
                  -> (tt -> IO tr) -- ^ Property accessor
@@ -355,12 +367,15 @@ defPropertyRW name g s =
   defProperty Property { propertyName = name
                        , propertyType = mTypeOf (undefined :: tr)
                        , propertyReadFunc = marshalFunc0 accessor
-                       , propertyWriteFunc = Just (marshalFunc1 writer)
+                       , propertyWriteFunc = Just (marshalFunc0 writer)
                        , propertyFlags = [pfScriptable, pfReadable, pfWritable, pfStored]
                        }
   where
-    accessor p0 pr = unmarshal p0 >>= g >>= marshal pr
-    writer p0 p1 _ = do
+    accessor p0 pr = do
+      v0 <- unmarshal p0
+      r <- g v0
+      marshal pr r
+    writer p0 p1 = do
       v0 <- unmarshal p0
       v1 <- unmarshal p1
       s v0 v1

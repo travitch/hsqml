@@ -57,6 +57,7 @@ int HsQMLObject::qt_metacall(QMetaObject::Call c, int id, void** a)
   else if (QMetaObject::WriteProperty == c) {
     HsQMLUniformFunc uf = mKlass->properties()[2*id+1];
     if (uf) {
+      char** args =(char**)a;
       uf(this, a);
     }
     id -= mKlass->mPropertyCount;
@@ -101,7 +102,6 @@ extern "C" void hsqml_allocate_in_place(void *memory, void *priv, HsQMLClassHand
 extern "C" void hsqml_register_type(HsQMLPlacementFunc placementAllocator,
     const char *uri, int versionMajor, int versionMinor, const char *qmlName)
 {
-  printf("Attempting to register [%s] %d.%d (%s)\n", uri, versionMajor, versionMinor, qmlName);
   QDeclarativePrivate::RegisterType rt;
   rt.version = 0;
 
