@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables, TypeFamilies, FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances, OverlappingInstances #-}
+{-# LANGUAGE CPP #-}
 -- | Facilities for defining new object types which can be marshalled between
 -- Haskell and QML.
 --
@@ -71,6 +72,7 @@ import Foreign.StablePtr
 import Foreign.Storable
 import Foreign.Marshal.Array
 import Language.Haskell.TH
+import System.FilePath ( takeExtension )
 import System.IO.Unsafe
 
 --
@@ -127,11 +129,17 @@ data MetaClass tt = MetaClass { classType :: TypeName
                               , classData :: HsQMLClassHandle
                               }
 
+#if __GLASGOW_HASKELL__ >= 704
+type TypeKey = TypeRep
+#else
+type TypeKey = Int
+#endif
+
 {-# NOINLINE metaClassDb #-}
 -- | This is a global lookup table mapping keys to MetaClass objects.
 -- The Int keys are computed from types using Data.Typeable (allowing
 -- information recovery from the existential).
-metaClassDb :: forall a. IORef (Map TypeRep (MetaClass a))
+metaClassDb :: forall a. IORef (Map TypeKey (MetaClass a))
 metaClassDb = unsafePerformIO $ newIORef Map.empty
 
 {-# NOINLINE metaClass #-}
@@ -141,19 +149,26 @@ metaClassDb = unsafePerformIO $ newIORef Map.empty
 metaClass :: forall tt. (MetaObject tt) => MetaClass tt
 metaClass = unsafePerformIO $ do
   let typ  = typeOf (undefined :: tt)
+#if __GLASGOW_HASKELL__ >= 704
       name = tyConName $ typeRepTyCon typ
-      def  = classDef :: DefClass tt ()
+      key = typ
+#else
+      -- This includes the Module name; we need to drop that to make a
+      -- valid QML identifier.  takeExtension leaves the leading ., so
+      -- drop it using tail.
+      name = tail $ takeExtension $ tyConString $ typeRepTyCon typ
+  key <- typeRepKey typ
+#endif
+  let def  = classDef :: DefClass tt ()
       Version (major, minor) = classVersion :: ClassVersion tt
       URI uri = classURI :: ClassURI tt
       Constructor ctor = classUserDataConstructor :: ClassConstructor tt
---  key <- typeRepKey typ
   db  <- readIORef metaClassDb
-  case Map.lookup typ db of
+  case Map.lookup key db of
     Just mClass -> return mClass
     Nothing     -> do
-      -- mClass <- createClass (name ++ showInt key "") def
-      mClass <- createClass name {-(name ++ showsTypeRep typ "")-} def
-      writeIORef metaClassDb $ Map.insert typ mClass db
+      mClass <- createClass name def
+      writeIORef metaClassDb $ Map.insert key mClass db
 
       let placementFunc place = do
             udata <- ctor
@@ -195,7 +210,6 @@ createClass name (DefClass methods properties _) = do
         Nothing -> return nullFunPtr
         Just w -> marshalFunc w
   pWrites <- mapM trWr properties
---  pWrites <- mapM (fromMaybe (return nullFunPtr) . fmap marshalFunc . propertyWriteFunc) properties
   -- The array of accessors and mutators is arranged such that the
   -- read and write functions for a given property are adjacent in the
   -- array, so we do the interleaving step here.
@@ -600,6 +614,8 @@ registerTypes = do
   let rexp = AppE (VarE (mkName "return")) (TupE [])
   return $! foldr makeForceVal rexp instances
 
+
+#if __GLASGOW_HASKELL__ >= 704
 makeForceVal :: Dec -> Exp -> Exp
 makeForceVal (InstanceD _ (AppT _ t ) _) acc =
   AppE f1 acc
@@ -608,3 +624,13 @@ makeForceVal (InstanceD _ (AppT _ t ) _) acc =
     app = AppE (VarE (mkName "mTypeOf")) uval
     f1 = AppE (VarE (mkName "seq")) app
 makeForceVal d _ = error ("Unepxected decl: " ++ show d)
+#else
+makeForceVal :: ClassInstance -> Exp -> Exp
+makeForceVal ClassInstance { ci_tys = [t] } acc =
+  AppE f1 acc
+  where
+    uval = SigE (VarE (mkName "undefined")) t
+    app = AppE (VarE (mkName "mTypeOf")) uval
+    f1 = AppE (VarE (mkName "seq")) app
+makeForceVal i _ = error ("Unexpected instance: " ++ show i)
+#endif
