@@ -48,6 +48,9 @@ module Graphics.QML.Types.Classes (
   -- * Properties
   defPropertyRO,
   defPropertyRW,
+
+  -- * TH Helpers
+  registerTypes
 ) where
 
 import Graphics.QML.Internal.Core
@@ -67,6 +70,7 @@ import Foreign.Ptr
 import Foreign.StablePtr
 import Foreign.Storable
 import Foreign.Marshal.Array
+import Language.Haskell.TH
 import System.IO.Unsafe
 
 --
@@ -570,3 +574,37 @@ methodSignature method =
 methodParameters :: Method tt -> String
 methodParameters method =
   replicate (flip (-) 2 $ length $ methodTypes method) ','
+
+
+-- TH Helpers
+
+-- | This function is meant to be used at the beginning of main as:
+--
+-- > main :: IO ()
+-- > main = do
+-- >   $registerTypes
+-- >   return ()
+--
+-- It registers all of the types implementing the 'MetaObject'
+-- interface with the QML runtime system (analagous to qmlRegisterType
+-- in C++).
+--
+-- If you do not call this function, you will not be able to reference
+-- your defined types from within QML.
+--
+-- Remember to enable the TemplateHaskell language extension.
+registerTypes :: Q Exp
+registerTypes = do
+  let iname = mkName "MetaObject"
+  ClassI _ instances <- reify iname
+  let rexp = AppE (VarE (mkName "return")) (TupE [])
+  return $! foldr makeForceVal rexp instances
+
+makeForceVal :: Dec -> Exp -> Exp
+makeForceVal (InstanceD _ (AppT _ t ) _) acc =
+  AppE f1 acc
+  where
+    uval = SigE (VarE (mkName "undefined")) t
+    app = AppE (VarE (mkName "mTypeOf")) uval
+    f1 = AppE (VarE (mkName "seq")) app
+makeForceVal d _ = error ("Unepxected decl: " ++ show d)
