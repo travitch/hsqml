@@ -32,9 +32,12 @@
 -- for use in QML.
 module Graphics.QML.Types.Classes (
   -- * Classes
-  MetaObject ( classDef ),
-  UserData,
+  MetaObject ( .. ),
   DefClass,
+  ClassVersion(..),
+  ClassURI(..),
+  ClassConstructor(..),
+  Marshallable(..),
 
   -- * Methods
   defMethod0,
@@ -61,6 +64,7 @@ import Data.Typeable
 import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Ptr
+import Foreign.StablePtr
 import Foreign.Storable
 import Foreign.Marshal.Array
 import System.IO.Unsafe
@@ -68,6 +72,10 @@ import System.IO.Unsafe
 --
 -- MetaObject
 --
+
+data ClassVersion tt = Version (Int, Int)
+data ClassURI tt = URI String
+data ClassConstructor tt = Constructor (IO (UserData tt))
 
 -- | The class 'MetaObject' allows Haskell types to be accessed as objects
 -- from within QML.
@@ -86,6 +94,13 @@ class (Typeable tt) => MetaObject tt where
   -- (these are the methods and properties visible in QML and to other
   -- QObjects).
   classDef :: DefClass tt ()
+  -- | A (wrapped) nullary action to build a (UserData tt).  This is
+  -- needed since the QML runtime will allocate instances of these
+  -- classes, and this is necessary to set up the UserData.
+  classUserDataConstructor :: ClassConstructor tt
+  classVersion :: ClassVersion tt
+  classURI :: ClassURI tt
+
 
 -- | This is the default Marshallable instance provided for all
 -- MetaObjects.  It should be sufficient for anything...
@@ -124,6 +139,9 @@ metaClass = unsafePerformIO $ do
   let typ  = typeOf (undefined :: tt)
       name = tyConName $ typeRepTyCon typ
       def  = classDef :: DefClass tt ()
+      Version (major, minor) = classVersion :: ClassVersion tt
+      URI uri = classURI :: ClassURI tt
+      Constructor ctor = classUserDataConstructor :: ClassConstructor tt
 --  key <- typeRepKey typ
   db  <- readIORef metaClassDb
   case Map.lookup typ db of
@@ -132,6 +150,19 @@ metaClass = unsafePerformIO $ do
       -- mClass <- createClass (name ++ showInt key "") def
       mClass <- createClass (name ++ showsTypeRep typ "") def
       writeIORef metaClassDb $ Map.insert typ mClass db
+
+      let placementFunc place = do
+            udata <- ctor
+            spudata <- newStablePtr udata
+            let pudata = castStablePtrToPtr spudata
+            withHsQMLClassHandle (classData mClass) $ \h -> do
+              hsqmlAllocateInPlace place pudata h
+      ctorPtr <- marshalPlacementFunc placementFunc
+
+      -- Now register this class with the equivalent of
+      -- qmlRegisterType so that instances can be created from QML.
+      hsqmlRegisterType ctorPtr uri major minor name
+
       return mClass
 
 -- | This is a helper to convert a DefClass (defined in MetaObject

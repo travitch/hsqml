@@ -1,5 +1,9 @@
 #include <HsFFI.h>
+#include <QObject>
+#include <qdeclarative.h>
 #include <QDeclarativeEngine>
+#include <QDeclarativeListProperty>
+#include <qdeclarativeprivate.h>
 
 #include "HsQMLObject.h"
 #include "HsQMLClass.h"
@@ -81,10 +85,54 @@ extern "C" HsQMLObjectHandle* hsqml_create_object(
   return (HsQMLObjectHandle*)obj;
 }
 
-extern void* hsqml_get_haskell(
-  HsQMLObjectHandle* hndl)
+extern void* hsqml_get_haskell(HsQMLObjectHandle* hndl)
 {
   HsQMLObject* obj = (HsQMLObject*)hndl;
   return  obj->haskell();
 }
 
+extern "C" void hsqml_allocate_in_place(void *memory, void *priv, HsQMLClassHandle *khdl)
+{
+  HsQMLClass *klass = (HsQMLClass*)khdl;
+  new (memory) HsQMLObject(priv, klass);
+  HsQMLObject *o = (HsQMLObject*)memory;
+}
+
+extern "C" void hsqml_register_type(HsQMLPlacementFunc placementAllocator,
+    const char *uri, int versionMajor, int versionMinor, const char *qmlName)
+{
+  printf("Attempting to register [%s] %d.%d (%s)\n", uri, versionMajor, versionMinor, qmlName);
+  QDeclarativePrivate::RegisterType rt;
+  rt.version = 0;
+
+  // Not supporting QDeclarativeItems; there are not drawing
+  // primitives exposed in this library currently, so there isn't much
+  // point.
+
+  rt.typeId = qMetaTypeId<QObject*>();
+  rt.listId = qMetaTypeId<QDeclarativeListProperty<QObject> >();
+  rt.attachedPropertiesFunction =
+    QDeclarativePrivate::attachedPropertiesFunc<QObject>();
+  rt.attachedPropertiesMetaObject =
+    QDeclarativePrivate::attachedPropertiesMetaObject<QObject>();
+  rt.parserStatusCast =
+    QDeclarativePrivate::StaticCastSelector<QObject, QDeclarativeParserStatus>::cast();
+  rt.valueSourceCast =
+    QDeclarativePrivate::StaticCastSelector<QObject, QDeclarativePropertyValueSource>::cast();
+  rt.valueInterceptorCast =
+    QDeclarativePrivate::StaticCastSelector<QObject, QDeclarativePropertyValueInterceptor>::cast();
+
+  rt.objectSize = sizeof(HsQMLObject);
+  rt.create = placementAllocator;
+  rt.uri = uri;
+  rt.versionMajor = versionMajor;
+  rt.versionMinor = versionMinor;
+  rt.elementName = qmlName;
+  rt.metaObject = &HsQMLObject::staticMetaObject;
+
+  rt.extensionObjectCreate = 0;
+  rt.extensionMetaObject = 0;
+  rt.customParser = 0;
+
+  QDeclarativePrivate::qmlregister(QDeclarativePrivate::TypeRegistration, &rt);
+}

@@ -19,4 +19,6 @@ private:
   void* mHaskell;
   HsQMLClass* mKlass;
 };
+
+
 #endif /*HSQML_OBJECT_H*/

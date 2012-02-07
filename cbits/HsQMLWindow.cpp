@@ -58,33 +58,4 @@ void HsQMLWindow::setSource(const QUrl& url)
 {
   mSource = url;
   mView.setSource(url);
-  // if (mComponent) {
-  //   delete mComponent;
-  //   mComponent = NULL;
-  // }
-
-  // if (!mSource.isEmpty()) {
-  //   mComponent = new QDeclarativeComponent(mEngine->engine(), mSource, this);
-  //   if (mComponent->isLoading()) {
-  //     QObject::connect(
-  //       mComponent, SIGNAL(statusChanged(QDeclarativeComponent::Status)),
-  //       this, SLOT(completeSetSource()));
-  //   }
-  //   else {
-  //     completeSetSource();
-  //   }
-  // }
 }
-
-// void HsQMLWindow::completeSetSource()
-// {
-//   QObject::disconnect(
-//     mComponent, SIGNAL(statusChanged(QDeclarativeComponent::Status)),
-//     this, SLOT(completeSetSource()));
-//   QDeclarativeItem* item =
-//     qobject_cast<QDeclarativeItem*>(mComponent->create(&mContext));
-//   if (item) {
-//     // mScene.addItem(item);
-//     mView.scene()->addItem(item);
-//   }
-// }

@@ -4,6 +4,7 @@
 
 module Graphics.QML.Internal.Classes where
 
+import Foreign.C.String
 import Foreign.C.Types
 import Foreign.Ptr
 import Foreign.ForeignPtr
@@ -12,9 +13,13 @@ import Foreign.StablePtr
 #include "hsqml.h"
 
 type UniformFunc = Ptr () -> Ptr (Ptr ()) -> IO ()
+type PlacementFunc = Ptr () -> IO ()
 
 foreign import ccall "wrapper"
   marshalFunc :: UniformFunc -> IO (FunPtr UniformFunc)
+
+foreign import ccall "wrapper"
+  marshalPlacementFunc :: PlacementFunc -> IO (FunPtr PlacementFunc)
 
 {#pointer *HsQMLClassHandle as ^ foreign newtype #}
 
@@ -35,6 +40,18 @@ newClassHandle p =
    id `Ptr (FunPtr UniformFunc)',
    id `Ptr (FunPtr UniformFunc)'} ->
   `Maybe HsQMLClassHandle' newClassHandle* #}
+
+{#fun unsafe hsqml_allocate_in_place as ^
+  {id `Ptr ()',
+   id `Ptr ()',
+   id `Ptr HsQMLClassHandle'} -> `()' #}
+
+{#fun unsafe hsqml_register_type as ^
+  {id `FunPtr PlacementFunc',
+   `String',
+   `Int',
+   `Int',
+   `String'} -> `()' #}
 
 {#pointer *HsQMLObjectHandle as ^ newtype #}
 

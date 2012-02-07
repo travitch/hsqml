@@ -11,66 +11,59 @@ extern "C" {
 extern void hsqml_run();
 
 /* Engine */
-extern void hsqml_create_engine(
-  void*,
-  const char*);
+extern void hsqml_create_engine(void*, const char*);
 
 /* String */
 typedef char HsQMLStringHandle;
 
 extern const int hsqml_string_size;
 
-extern void hsqml_init_string(
-  HsQMLStringHandle*);
+extern void hsqml_init_string(HsQMLStringHandle*);
 
-extern void hsqml_deinit_string(
-  HsQMLStringHandle*);
+extern void hsqml_deinit_string(HsQMLStringHandle*);
 
-extern void hsqml_marshal_string(
-  const wchar_t*, int, HsQMLStringHandle*);
+extern void hsqml_marshal_string(const wchar_t*, int, HsQMLStringHandle*);
 
-extern int hsqml_unmarshal_string_maxlen(
-  HsQMLStringHandle*);
+extern int hsqml_unmarshal_string_maxlen(HsQMLStringHandle*);
 
-extern int hsqml_unmarshal_string(
-  HsQMLStringHandle*, wchar_t*);
+extern int hsqml_unmarshal_string(HsQMLStringHandle*, wchar_t*);
 
 /* URL */
 typedef char HsQMLUrlHandle;
 
 extern const int hsqml_url_size;
 
-extern void hsqml_init_url(
-  HsQMLUrlHandle*);
+extern void hsqml_init_url(HsQMLUrlHandle*);
 
-extern void hsqml_deinit_url(
-  HsQMLUrlHandle*);
+extern void hsqml_deinit_url(HsQMLUrlHandle*);
 
-extern void hsqml_string_to_url(
-  HsQMLStringHandle*, HsQMLUrlHandle*);
+extern void hsqml_string_to_url(HsQMLStringHandle*, HsQMLUrlHandle*);
 
-extern void hsqml_url_to_string(
-  HsQMLUrlHandle*, HsQMLStringHandle*);
+extern void hsqml_url_to_string(HsQMLUrlHandle*, HsQMLStringHandle*);
 
 /* Class */
 typedef char HsQMLClassHandle;
 
 typedef void (*HsQMLUniformFunc)(void*, void**);
 
-extern HsQMLClassHandle* hsqml_create_class(
-  unsigned int*, char*, HsQMLUniformFunc*, HsQMLUniformFunc*);
+typedef void (*HsQMLPlacementFunc)(void*);
 
-extern void hsqml_finalise_class_handle(
-  HsQMLClassHandle* hndl);
+extern HsQMLClassHandle*
+hsqml_create_class(unsigned int*, char*, HsQMLUniformFunc*, HsQMLUniformFunc*);
+
+extern void hsqml_finalise_class_handle(HsQMLClassHandle* hndl);
 
 /* Object */
 typedef char HsQMLObjectHandle;
 
-extern HsQMLObjectHandle* hsqml_create_object(
-  void*, HsQMLClassHandle*);
+extern HsQMLObjectHandle* hsqml_create_object(void*, HsQMLClassHandle*);
 
-extern void* hsqml_get_haskell(
-  HsQMLObjectHandle*);
+extern void* hsqml_get_haskell(HsQMLObjectHandle*);
+
+/* Types */
+extern void hsqml_register_type(HsQMLPlacementFunc, const char*,
+    int, int, const char*);
+extern void hsqml_allocate_in_place(void*, void*, HsQMLClassHandle*);
 
 #ifdef __cplusplus
 }

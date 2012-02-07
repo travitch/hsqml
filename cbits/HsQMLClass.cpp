@@ -4,6 +4,7 @@
 #include <QString>
 #include <QMutex>
 #include <QMap>
+#include <QVector>
 #include <QDebug>
 
 #include "hsqml.h"

@@ -18,10 +18,8 @@ import Network.URI (URI, parseURIReference, uriToString)
 --
 
 instance Marshallable () where
-  marshal _ _ =
-    error "Cannot marshal void."
-  unmarshal _ =
-    return ()
+  marshal _ _ = error "Cannot marshal void."
+  unmarshal _ = return ()
   mSizeOf _ = 0
   mTypeOf _ = TypeName ""
 
@@ -30,10 +28,8 @@ instance Marshallable () where
 --
 
 instance Marshallable Int where
-  marshal ptr value =
-    poke (castPtr ptr :: Ptr CInt) (fromIntegral value)
-  unmarshal ptr =
-    peek (castPtr ptr :: Ptr CInt) >>= return . fromIntegral
+  marshal ptr value = poke (castPtr ptr :: Ptr CInt) (fromIntegral value)
+  unmarshal ptr = peek (castPtr ptr :: Ptr CInt) >>= return . fromIntegral
   mSizeOf _ = sizeOf (0 :: CInt)
   mTypeOf _ = TypeName "int"
 
@@ -42,10 +38,8 @@ instance Marshallable Int where
 --
 
 instance Marshallable String where
-  marshal ptr str =
-    hsqmlMarshalString str (HsQMLStringHandle $ castPtr ptr)
-  unmarshal ptr =
-    hsqmlUnmarshalString (HsQMLStringHandle $ castPtr ptr)
+  marshal ptr str = hsqmlMarshalString str (HsQMLStringHandle $ castPtr ptr)
+  unmarshal ptr = hsqmlUnmarshalString (HsQMLStringHandle $ castPtr ptr)
   mSizeOf _ = hsqmlStringSize
   mTypeOf _ = TypeName "QString"
 

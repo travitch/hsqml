@@ -15,8 +15,7 @@ enum MDFields {
 class HsQMLClass
 {
 public:
-  HsQMLClass(
-    unsigned int*, char*, HsQMLUniformFunc*, HsQMLUniformFunc*);
+  HsQMLClass(unsigned int*, char*, HsQMLUniformFunc*, HsQMLUniformFunc*);
   ~HsQMLClass();
   const HsQMLUniformFunc* methods();
   const HsQMLUniformFunc* properties();
