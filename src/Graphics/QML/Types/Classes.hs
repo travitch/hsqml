@@ -72,7 +72,9 @@ import Foreign.StablePtr
 import Foreign.Storable
 import Foreign.Marshal.Array
 import Language.Haskell.TH
+#if __GLASGOW_HASKELL__ < 704
 import System.FilePath ( takeExtension )
+#endif
 import System.IO.Unsafe
 
 --
@@ -129,11 +131,6 @@ data MetaClass tt = MetaClass { classType :: TypeName
                               , classData :: HsQMLClassHandle
                               }
 
-#if __GLASGOW_HASKELL__ >= 704
-type TypeKey = TypeRep
-#else
-type TypeKey = Int
-#endif
 
 {-# NOINLINE metaClassDb #-}
 -- | This is a global lookup table mapping keys to MetaClass objects.
@@ -149,20 +146,11 @@ metaClassDb = unsafePerformIO $ newIORef Map.empty
 metaClass :: forall tt. (MetaObject tt) => MetaClass tt
 metaClass = unsafePerformIO $ do
   let typ  = typeOf (undefined :: tt)
-#if __GLASGOW_HASKELL__ >= 704
-      name = tyConName $ typeRepTyCon typ
-      key = typ
-#else
-      -- This includes the Module name; we need to drop that to make a
-      -- valid QML identifier.  takeExtension leaves the leading ., so
-      -- drop it using tail.
-      name = tail $ takeExtension $ tyConString $ typeRepTyCon typ
-  key <- typeRepKey typ
-#endif
-  let def  = classDef :: DefClass tt ()
+      def  = classDef :: DefClass tt ()
       Version (major, minor) = classVersion :: ClassVersion tt
       URI uri = classURI :: ClassURI tt
       Constructor ctor = classUserDataConstructor :: ClassConstructor tt
+  (name, key) <- examineTypeInfo typ
   db  <- readIORef metaClassDb
   case Map.lookup key db of
     Just mClass -> return mClass
@@ -614,8 +602,13 @@ registerTypes = do
   let rexp = AppE (VarE (mkName "return")) (TupE [])
   return $! foldr makeForceVal rexp instances
 
-
 #if __GLASGOW_HASKELL__ >= 704
+type TypeKey = TypeRep
+
+examineTypeInfo :: TypeRep -> IO (String, TypeKey)
+examineTypeInfo typ = do
+  return (tyConName (typeRepTyCon typ), typ)
+
 makeForceVal :: Dec -> Exp -> Exp
 makeForceVal (InstanceD _ (AppT _ t ) _) acc =
   AppE f1 acc
@@ -625,6 +618,17 @@ makeForceVal (InstanceD _ (AppT _ t ) _) acc =
     f1 = AppE (VarE (mkName "seq")) app
 makeForceVal d _ = error ("Unepxected decl: " ++ show d)
 #else
+type TypeKey = Int
+
+examineTypeInfo :: TypeRep -> IO (String, TypeKey)
+examineTypeInfo typ = do
+  key <- typeRepKey typ
+  -- This includes the Module name; we need to drop that to make a
+  -- valid QML identifier.  takeExtension leaves the leading ., so
+  -- drop it using tail.
+  let name = tail $ takeExtension $ tyConString $ typeRepTyCon typ
+  return (name, key)
+
 makeForceVal :: ClassInstance -> Exp -> Exp
 makeForceVal ClassInstance { ci_tys = [t] } acc =
   AppE f1 acc
