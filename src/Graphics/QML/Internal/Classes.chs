@@ -49,8 +49,8 @@ newClassHandle p =
 {#fun unsafe hsqml_register_type as ^
   {id `FunPtr PlacementFunc',
    `String',
-   `Int',
-   `Int',
+   fromIntegral `CInt',
+   fromIntegral `CInt',
    `String'} -> `()' #}
 
 {#pointer *HsQMLObjectHandle as ^ newtype #}
