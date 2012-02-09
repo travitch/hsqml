@@ -60,6 +60,8 @@ extern HsQMLObjectHandle* hsqml_create_object(void*, HsQMLClassHandle*);
 
 extern void* hsqml_get_haskell(HsQMLObjectHandle*);
 
+extern void hsqml_emit_signal(HsQMLObjectHandle*, int, void**);
+
 /* Types */
 extern void hsqml_register_type(HsQMLPlacementFunc, const char*,
     int, int, const char*);

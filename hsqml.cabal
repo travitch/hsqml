@@ -23,7 +23,8 @@ Library
     containers >= 0.4 && < 0.5,
     network >= 2.3 && < 2.4,
     transformers >= 0.2 && < 0.3,
-    template-haskell, filepath
+    template-haskell, th-lift,
+    filepath
   Exposed-modules:
     Graphics.QML
     Graphics.QML.Engine
@@ -35,6 +36,7 @@ Library
     Graphics.QML.Internal.Engine
     Graphics.QML.Internal.Intrinsics
     Graphics.QML.Internal.Classes
+    Graphics.QML.Internal.TH
   Hs-source-dirs: src
   Cc-options: -std=c++0x
   C-sources:

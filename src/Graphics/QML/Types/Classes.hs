@@ -83,7 +83,8 @@ import System.IO.Unsafe
 
 data ClassVersion tt = Version (Int, Int)
 data ClassURI tt = URI String
-data ClassConstructor tt = Constructor (IO (UserData tt))
+--data ClassConstructor tt = Constructor (IO (UserData tt))
+data ClassConstructor tt = Constructor (IO tt)
 
 -- | The class 'MetaObject' allows Haskell types to be accessed as objects
 -- from within QML.
@@ -97,7 +98,7 @@ data ClassConstructor tt = Constructor (IO (UserData tt))
 -- to compile time (like moc).
 class (Typeable tt) => MetaObject tt where
   -- | The type of user data carried by all objects of this class
-  type UserData tt
+--  type UserData tt
   -- | The definition of the methods and properties of this MetaObject
   -- (these are the methods and properties visible in QML and to other
   -- QObjects).
@@ -109,6 +110,9 @@ class (Typeable tt) => MetaObject tt where
   classVersion :: ClassVersion tt
   classURI :: ClassURI tt
 
+-- |
+class (MetaObject tt) => SignalMetaObject tt where
+  metaObjectPtr :: tt -> Ptr ()
 
 -- | This is the default Marshallable instance provided for all
 -- MetaObjects.  It should be sufficient for anything...
