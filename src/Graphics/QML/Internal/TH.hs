@@ -6,16 +6,11 @@ module Graphics.QML.Internal.TH (
   -- * Functions
   defClass,
 
-  -- * TH
-  defMarshalFuncN,
-
   -- * Internal (used in TH expansions)
   Property(..),
   Method(..),
   Signal(..),
-  InternalClassDefinition(..),
-  qmlWrapAccessor,
-  qmlWrapMutator
+  InternalClassDefinition(..)
   ) where
 
 import Data.Bits
@@ -147,27 +142,6 @@ trProperties ps = mapM trProp ps >>= (return . ListE)
       let mfunc = VarE (mkName "marshalMutator")
       return $! AppE (ConE (mkName "Just")) (AppE mfunc (VarE n))
 
-
--- | A wrapper to make user-specified accessor functions
--- marshal/unmarshal data properly.
-qmlWrapAccessor :: (Marshallable a, Marshallable b)
-                   => (a -> IO b)
-                   -> Ptr () -> Ptr () -> IO ()
-qmlWrapAccessor g p0 pr = do
-  v0 <- unmarshal p0
-  r <- g v0
-  marshal pr r
-
--- | A wrapper to make user-specified mutators marshal/unmarshal data
-qmlWrapMutator :: (Marshallable a, Marshallable b)
-                  => (a -> b -> IO c)
-                  -> Ptr () -> Ptr () -> IO c
-qmlWrapMutator s p0 p1 = do
-  v0 <- unmarshal p0
-  v1 <- unmarshal p1
-  s v0 v1
-
-
 -- | Translate a ProtoMethod to an Exp representing its equivalent
 -- Method.
 --
@@ -193,14 +167,10 @@ trMethods ms = mapM trMeth ms >>= return . ListE
       mfunc <- mkUniformFunc mref (tail argTypes)
       return $! AppE c2 mfunc
     mkUniformFunc fname ts = do
-      -- mfuncName <- newName "marshalFunc"
       let mfuncName = mkName ("marshalFunc" ++ show (length ts))
       let mfunc = VarE mfuncName
       dec <- defMarshalFunc (length ts)
       return $! LetE [dec] (AppE mfunc (VarE fname))
-
-      -- let defMeth = mkName ("defMethod" ++ show (length ts))
-      -- in AppE (VarE defMeth) (VarE fname)
 
 typeToTypeNameExp :: Type -> Exp
 typeToTypeNameExp t =
@@ -292,9 +262,6 @@ buildSignal clsName (signum, (PSignal name ts)) = do
   let c1 = Clause cpatt (NormalB body1) []
       fdef = FunD (mkName name) [c1]
   return [sig, fdef]
-
-defMarshalFuncN :: Int -> Q [Dec]
-defMarshalFuncN n = mapM defMarshalFunc [0..n]
 
 defMarshalFunc :: Int -> Q Dec
 defMarshalFunc i = do

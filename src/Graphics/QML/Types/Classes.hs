@@ -50,8 +50,6 @@ module Graphics.QML.Types.Classes (
   registerTypes,
 
   -- * Internal
-  qmlWrapAccessor,
-  qmlWrapMutator,
   Property(..),
   Method(..),
   InternalClassDefinition(..),
