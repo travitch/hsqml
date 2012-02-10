@@ -67,6 +67,7 @@ import Graphics.QML.Internal.TH
 
 import Control.Monad
 import Control.Monad.Trans.State
+import Data.Bits
 import Data.Map ( Map )
 import qualified Data.Map as Map
 import Data.Maybe
@@ -173,11 +174,12 @@ createClass :: forall tt. (MetaObject tt)
                => String -- ^ The class name (derived from Typeable usually)
                -> InternalClassDefinition tt
                -> IO (MetaClass tt)
-createClass name (InternalClassDef _ _ properties methods _ _) = do
+createClass name (InternalClassDef _ _ properties methods signals _) = do
   -- This is the moc step; metaData is equivalent to the
   -- qt_meta_data_<TYPE> array that moc produces.  metaStrData is
   -- equivalent to qt_meta_stringdata_<TYPE>.
-  let (MOCOutput metaData metaStrData) = compileClass name methods properties
+  let (MOCOutput metaData metaStrData) =
+        compileClass name signals methods properties
 
   -- Convert all of the class description stuff into C-compatible
   -- types (arrays of Storable types).
@@ -349,10 +351,25 @@ writeMethod m = do
   -- This is the tag field; it isn't clear exactly what it is supposed
   -- to be, but making it equal to the type seems to work.
   writeString $ typeName $ head $ methodTypes m
-  writeInt mfAccessPublic
+  writeInt (mfAccessPublic .|. mfMethodMethod)
   st <- get
   put st { mDataMethodsIdx = mplus (mDataMethodsIdx st) (Just idx) }
   return ()
+
+-- | Almost the same as writeMethod; the flags are a bit different.
+-- They should be refactored into a common function eventually...
+writeSignal :: Signal -> State MOCState ()
+writeSignal s = do
+  idx <- get >>= return . mDataLen
+  writeString $ signalSignature s
+  writeString $ signalParameters s
+  writeString $ typeName $ head $ signalArgTypes s
+  writeString $ typeName $ head $ signalArgTypes s
+  writeInt (mfAccessProtected .|. mfMethodSignal)
+  st <- get
+  put st { mDataMethodsIdx = mplus (mDataMethodsIdx st) (Just idx) }
+  return ()
+
 
 -- | Write a property into the property table of mData.  Each
 -- component has three fields: name, type, flags.
@@ -376,8 +393,8 @@ writeProperty p = do
 --
 -- FIXME: The format is currently hard-coded as 5 (qt 4.7).  qt 4.8 is
 -- at 6.
-compileClass :: String -> [Method] -> [Property] -> MOCOutput
-compileClass name ms ps =
+compileClass :: String -> [Signal] -> [Method] -> [Property] -> MOCOutput
+compileClass name ss ms ps =
   let enc = flip execState newMOCState $ do
         writeInt 5                           -- Revision (Qt 4.7)
         writeString name                     -- Class name
@@ -391,7 +408,8 @@ compileClass name ms ps =
         writeInt 0 >> writeInt 0             -- Enums
         writeInt 0 >> writeInt 0             -- Constructors
         writeInt 0                           -- Flags
-        writeInt 0                           -- Signals
+        writeInt $ fromIntegral (length ss)  -- Signals
+        mapM_ writeSignal ss
         mapM_ writeMethod ms
         mapM_ writeProperty ps
         writeInt 0
@@ -411,12 +429,22 @@ methodSignature method =
        foldr0 (\l r -> l . showChar ',' . r) id
          (map (showString . typeName) paramTypes) . showChar ')') ""
 
+signalSignature :: Signal -> String
+signalSignature sig =
+  let ts = signalArgTypes sig
+  in (showString (signalName sig) . showChar '.' .
+       foldr0 (\l r -> l . showChar ',' . r) id
+         (map (showString . typeName) ts) . showChar ')') ""
+
 -- | moc stores the method parameter list as a comma-separated (with
 -- no spaces) list of the parameter names.
 methodParameters :: Method -> String
 methodParameters method =
   replicate (flip (-) 2 $ length $ methodTypes method) ','
 
+signalParameters :: Signal -> String
+signalParameters sig =
+  replicate (flip (-) 2 $ length $ signalArgTypes sig) ','
 
 -- TH Helpers
 
