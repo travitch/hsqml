@@ -225,9 +225,10 @@ trSigs = ListE . map trSig
       in AppE (VarE (mkName "mTypeOf")) uv
 
 mkFunType :: [Name] -> Type
-mkFunType = foldr addT (AppT ArrowT iot)
+mkFunType = foldr addT iot -- (AppT ArrowT iot)
   where
-    addT t acc = AppT ArrowT $ AppT (ConT t) acc
+    addT t acc = AppT (AppT ArrowT (ConT t)) acc
+    -- addT t acc = AppT ArrowT $ AppT (ConT t) acc
     iot = AppT (ConT (mkName "IO")) (TupleT 0)
 
 -- | Builds a function to emit a signal.  It is of the form:
@@ -247,36 +248,37 @@ mkFunType = foldr addT (AppT ArrowT iot)
 -- >       hsqmlEmitSignal self signum p0
 buildSignal :: Name -> (Int, ProtoSignal) -> Q [Dec]
 buildSignal clsName (signo, (PSignal name ts)) = do
-  let sigTy = AppT (ConT clsName) $ mkFunType ts
-      sig = SigD (mkName name) sigTy
+  let sigTy = appT (appT arrowT (conT clsName)) (return (mkFunType ts))
 
       -- Make a list of variables self v0..vn where self will be the
       -- this ptr
       ixs :: [Int]
       ixs = [0..]
       argVars = take (length ts) $ map (\i -> mkName ("v" ++ show i)) ixs
-      cpatt = VarP (mkName "self") : map VarP argVars
+      cpatt = varP (mkName "self") : map varP argVars
 
   -- The body of the signal needs to eventually call hsqmlEmitSignal;
   -- however, we want to safely use a stack allocated array so we call
   -- through allocaBytes
   szName <- newName "sz"
   marshalAndCallName <- newName "marshalAndCall"
-  let szRef = VarE szName
-      marshalAndCall = VarE marshalAndCallName
-  let body0 = AppE (VarE (mkName "hsqmlAllocaBytes")) szRef
-      body1 = AppE body0 marshalAndCall
+  let szRef = varE szName
+      marshalAndCall = varE marshalAndCallName
+      body0 = appE (varE (mkName "hsqmlAllocaBytes")) szRef
+      body1 = appE body0 marshalAndCall
 
-      szDef = ValD (VarP szName) (NormalB $ ListE $ map mkSizeOf argVars) []
+      sumFunc = varE (mkName "sum")
+      szBody = appE sumFunc $ listE $ map mkSizeOf argVars
+      szDef = valD (varP szName) (normalB szBody) []
 
-  mshDef <- mkMarshalAndCall signo marshalAndCallName (varE (mkName "self")) argVars
+      mshDef = mkMarshalAndCall signo marshalAndCallName (varE (mkName "self")) argVars
 
-  let c1 = Clause cpatt (NormalB body1) [szDef, mshDef]
-      fdef = FunD (mkName name) [c1]
+  sig <- sigD (mkName name) sigTy
+  fdef <- funD (mkName name) [clause cpatt (normalB body1) [szDef, mshDef]]
   return [sig, fdef]
   where
-    mSizeOfRef = VarE (mkName "mSizeOf")
-    mkSizeOf v = AppE mSizeOfRef (VarE v)
+    mSizeOfRef = varE (mkName "mSizeOf")
+    mkSizeOf v = appE mSizeOfRef (varE v)
 
 mkMarshalAndCall :: Int -> Name -> ExpQ -> [Name] -> DecQ
 mkMarshalAndCall signo mname self vs = do
@@ -304,7 +306,7 @@ mkMarshalAndCall signo mname self vs = do
       letS [valD (varP res) (normalB ptrAdd) []]
       where
         sz = appE szFunc (varE v)
-        ptrAdd = appE (appE ptrAddFunc sz) (varE p)
+        ptrAdd = appE (appE ptrAddFunc (varE p)) sz
     -- | > hsqmlEmitSignal self signo p0
     mkEmit p0Name =
       let emit = varE (mkName "hsqmlEmitSignal")
