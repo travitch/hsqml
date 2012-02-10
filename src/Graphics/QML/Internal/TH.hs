@@ -330,4 +330,3 @@ defMarshalFunc i = do
       let v = mkName ("v" ++ show ix)
           p = mkName ("p" ++ show ix)
       in BindS (VarP v) (AppE unmar (VarE p))
---  let pty = AppT (ConT (mkName "Ptr")) (TupleT 0)
