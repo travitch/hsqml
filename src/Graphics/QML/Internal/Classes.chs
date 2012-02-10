@@ -53,6 +53,11 @@ newClassHandle p =
    fromIntegral `Int',
    `String'} -> `()' #}
 
+{#fun unsafe hsqml_emit_signal as ^
+  {id `Ptr ()',
+   fromIntegral `Int',
+   id `Ptr (Ptr ())'} -> `()' #}
+
 {#pointer *HsQMLObjectHandle as ^ newtype #}
 
 objToPtr :: a -> (Ptr () -> IO b) -> IO b

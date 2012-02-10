@@ -10,14 +10,18 @@ module Graphics.QML.Internal.TH (
   Property(..),
   Method(..),
   Signal(..),
-  InternalClassDefinition(..)
+  InternalClassDefinition(..),
+  hsqmlAllocaBytes,
+  hsqmlPlusPtr,
+  hsqmlPeekElemOff
   ) where
 
 import Data.Bits
 import Data.List ( foldl' )
 import Foreign.C.Types
-import Foreign.Marshal.Alloc
-import Foreign.Ptr
+import Foreign.Marshal.Alloc ( allocaBytes )
+import Foreign.Ptr ( Ptr, plusPtr )
+import Foreign.Storable ( Storable, peekElemOff )
 import Language.Haskell.TH
 
 import Graphics.QML.Internal.Primitive
@@ -232,17 +236,17 @@ mkFunType = foldr addT (AppT ArrowT iot)
 -- > signalName self v0 v1 v2 ... =
 -- >   allocaBytes sz marshalAndCall
 -- >   where
--- >     sz = sum [mSizeOf (undefined :: t1), mSizeOf (undefined :: t2), ..]
+-- >     sz = sum [mSizeOf v0, mSizeOf v1, ..]
 -- >     marshalAndCall p0 = do
 -- >       marshal p0 v0
--- >       let p1 = plusPtr (mSizeOf (undefined :: t1)) p0
+-- >       let p1 = plusPtr (mSizeOf v0) p0
 -- >       marshal p1 v1
--- >       let p2 = plusPtr (mSizeOf (undefined :: t2)) p1
+-- >       let p2 = plusPtr (mSizeOf v1) p1
 -- >       marshal p2 v2
 -- >       ..
 -- >       hsqmlEmitSignal self signum p0
 buildSignal :: Name -> (Int, ProtoSignal) -> Q [Dec]
-buildSignal clsName (signum, (PSignal name ts)) = do
+buildSignal clsName (signo, (PSignal name ts)) = do
   let sigTy = AppT (ConT clsName) $ mkFunType ts
       sig = SigD (mkName name) sigTy
 
@@ -250,18 +254,71 @@ buildSignal clsName (signum, (PSignal name ts)) = do
       -- this ptr
       ixs :: [Int]
       ixs = [0..]
-      argVars = take (length ts) $ map (\i -> VarP (mkName ("v" ++ show i))) ixs
-      cpatt = VarP (mkName "self") : argVars
+      argVars = take (length ts) $ map (\i -> mkName ("v" ++ show i)) ixs
+      cpatt = VarP (mkName "self") : map VarP argVars
 
-  -- The body of the signal needs to
+  -- The body of the signal needs to eventually call hsqmlEmitSignal;
+  -- however, we want to safely use a stack allocated array so we call
+  -- through allocaBytes
   szName <- newName "sz"
   marshalAndCallName <- newName "marshalAndCall"
-  let body0 = AppE (VarE (mkName "allocaBytes")) (VarE szName)
-      body1 = AppE body0 (VarE marshalAndCallName)
+  let szRef = VarE szName
+      marshalAndCall = VarE marshalAndCallName
+  let body0 = AppE (VarE (mkName "qmlAllocaBytes")) szRef
+      body1 = AppE body0 marshalAndCall
 
-  let c1 = Clause cpatt (NormalB body1) []
+      szDef = ValD (VarP szName) (NormalB $ ListE $ map mkSizeOf argVars) []
+
+  mshDef <- mkMarshalAndCall signo marshalAndCallName (varE (mkName "self")) argVars
+
+  let c1 = Clause cpatt (NormalB body1) [szDef, mshDef]
       fdef = FunD (mkName name) [c1]
   return [sig, fdef]
+  where
+    mSizeOfRef = VarE (mkName "mSizeOf")
+    mkSizeOf v = AppE mSizeOfRef (VarE v)
+
+mkMarshalAndCall :: Int -> Name -> ExpQ -> [Name] -> DecQ
+mkMarshalAndCall signo mname self vs = do
+  pNames@(p0Name:_) <- mapM (\ix -> newName ("p" ++ show ix)) [0..length vs]
+
+  -- Note that the ptr offset bindings (the pN variables) start at p1
+  -- since p0 is the parameter to the function.  The last pN and vN
+  -- are not needed to make these bindings.
+  let ps = map mkPtrOffsetBinding (zip3 (tail pNames) pNames vs)
+      ms = map mkMshl (zip pNames vs)
+      body = normalB $ doE (concat [ ps, ms, [mkEmit p0Name] ])
+      defClause = clause [varP p0Name] body []
+  funD mname [defClause]
+  where
+    mshlFunc = varE (mkName "marshal")
+    szFunc = varE (mkName "mSizeOf")
+    ptrAddFunc = varE (mkName "hsqmlPlusPtr")
+    -- | > marshal p v
+    mkMshl (p, v) =
+      noBindS $ appE (appE mshlFunc (varE p)) (varE v)
+    -- | Make a monadic let binding of the form
+    --
+    -- > let res = plusPtr (mSizeOf v) p
+    mkPtrOffsetBinding (res, p, v) =
+      letS [valD (varP res) (normalB ptrAdd) []]
+      where
+        sz = appE szFunc (varE v)
+        ptrAdd = appE (appE ptrAddFunc sz) (varE p)
+    -- | > hsqmlEmitSignal self signo p0
+    mkEmit p0Name =
+      let emit = varE (mkName "hsqmlEmitSignal")
+          sigEx = litE (integerL (fromIntegral signo))
+      in noBindS $ appE (appE (appE emit self) sigEx) (varE p0Name)
+
+hsqmlAllocaBytes :: Int -> (Ptr a -> IO b) -> IO b
+hsqmlAllocaBytes = allocaBytes
+
+hsqmlPlusPtr :: Ptr a -> Int -> Ptr b
+hsqmlPlusPtr = plusPtr
+
+hsqmlPeekElemOff :: (Storable a) => Ptr a -> Int -> IO a
+hsqmlPeekElemOff = peekElemOff
 
 defMarshalFunc :: Int -> Q Dec
 defMarshalFunc i = do
@@ -288,7 +345,7 @@ defMarshalFunc i = do
   return $! FunD name [cls]
   where
     marRet = VarE (mkName "marshalRet")
-    peekOff = VarE (mkName "peekElemOff")
+    peekOff = VarE (mkName "hsqmlPeekElemOff")
     unmar = VarE (mkName "unmarshal")
     mkPeek pv ix =
       let p = mkName ("p" ++ show ix)

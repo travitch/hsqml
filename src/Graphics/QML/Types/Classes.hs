@@ -55,7 +55,10 @@ module Graphics.QML.Types.Classes (
   InternalClassDefinition(..),
   marshalRet,
   marshalMutator,
-  peekElemOff
+  hsqmlAllocaBytes,
+  hsqmlPeekElemOff,
+  hsqmlPlusPtr,
+  hsqmlEmitSignal
 ) where
 
 import Graphics.QML.Internal.Core

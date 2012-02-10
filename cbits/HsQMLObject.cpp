@@ -137,7 +137,7 @@ extern "C" void hsqml_register_type(HsQMLPlacementFunc placementAllocator,
   QDeclarativePrivate::qmlregister(QDeclarativePrivate::TypeRegistration, &rt);
 }
 
-extern "C" void hsqml_emit_signal(HsQMLObjectHandle* hndl, int signum,
+extern "C" void hsqml_emit_signal(void* hndl, int signum,
     void **args)
 {
   HsQMLObject* obj = (HsQMLObject*)hndl;
