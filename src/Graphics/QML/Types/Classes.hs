@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, TypeFamilies, FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables, FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances, OverlappingInstances #-}
 {-# LANGUAGE CPP #-}
 -- | Facilities for defining new object types which can be marshalled between
@@ -33,33 +33,40 @@
 -- for use in QML.
 module Graphics.QML.Types.Classes (
   -- * Classes
-  MetaObject ( .. ),
-  DefClass,
-  ClassVersion(..),
-  ClassURI(..),
-  ClassConstructor(..),
+  MetaObject (..),
+  ClassDefinition(..),
   Marshallable(..),
 
   -- * Methods
-  defMethod0,
-  defMethod1,
-  defMethod2,
-  defMethod3,
+
+  defMethod,
 
   -- * Properties
   defPropertyRO,
   defPropertyRW,
 
   -- * TH Helpers
-  registerTypes
+  defClass,
+  registerTypes,
+
+  -- * Internal
+  qmlWrapAccessor,
+  qmlWrapMutator,
+  Property(..),
+  Method(..),
+  InternalClassDefinition(..),
+  marshalRet,
+  marshalMutator,
+  peekElemOff
 ) where
 
 import Graphics.QML.Internal.Core
 import Graphics.QML.Internal.Classes
+import Graphics.QML.Internal.Primitive
+import Graphics.QML.Internal.TH
 
 import Control.Monad
 import Control.Monad.Trans.State
-import Data.Bits
 import Data.Map ( Map )
 import qualified Data.Map as Map
 import Data.Maybe
@@ -81,11 +88,6 @@ import System.IO.Unsafe
 -- MetaObject
 --
 
-data ClassVersion tt = Version (Int, Int)
-data ClassURI tt = URI String
---data ClassConstructor tt = Constructor (IO (UserData tt))
-data ClassConstructor tt = Constructor (IO tt)
-
 -- | The class 'MetaObject' allows Haskell types to be accessed as objects
 -- from within QML.
 --
@@ -97,22 +99,7 @@ data ClassConstructor tt = Constructor (IO tt)
 -- TemplateHaskell to push the Haskell-side of the metaclass creation
 -- to compile time (like moc).
 class (Typeable tt) => MetaObject tt where
-  -- | The type of user data carried by all objects of this class
---  type UserData tt
-  -- | The definition of the methods and properties of this MetaObject
-  -- (these are the methods and properties visible in QML and to other
-  -- QObjects).
-  classDef :: DefClass tt ()
-  -- | A (wrapped) nullary action to build a (UserData tt).  This is
-  -- needed since the QML runtime will allocate instances of these
-  -- classes, and this is necessary to set up the UserData.
-  classUserDataConstructor :: ClassConstructor tt
-  classVersion :: ClassVersion tt
-  classURI :: ClassURI tt
-
--- |
-class (MetaObject tt) => SignalMetaObject tt where
-  metaObjectPtr :: tt -> Ptr ()
+  classDefinition :: InternalClassDefinition tt
 
 -- | This is the default Marshallable instance provided for all
 -- MetaObjects.  It should be sufficient for anything...
@@ -150,10 +137,10 @@ metaClassDb = unsafePerformIO $ newIORef Map.empty
 metaClass :: forall tt. (MetaObject tt) => MetaClass tt
 metaClass = unsafePerformIO $ do
   let typ  = typeOf (undefined :: tt)
-      def  = classDef :: DefClass tt ()
-      Version (major, minor) = classVersion :: ClassVersion tt
-      URI uri = classURI :: ClassURI tt
-      Constructor ctor = classUserDataConstructor :: ClassConstructor tt
+      def  = classDefinition :: InternalClassDefinition tt
+      (major, minor) = _classVersion def
+      uri = _classURI def
+      ctor = _classConstructor def
   (name, key) <- examineTypeInfo typ
   db  <- readIORef metaClassDb
   case Map.lookup key db of
@@ -184,9 +171,9 @@ metaClass = unsafePerformIO $ do
 -- type with the QObject runtime system.
 createClass :: forall tt. (MetaObject tt)
                => String -- ^ The class name (derived from Typeable usually)
-               -> DefClass tt () -- ^ The 'classDef' for this type
+               -> InternalClassDefinition tt
                -> IO (MetaClass tt)
-createClass name (DefClass methods properties _) = do
+createClass name (InternalClassDef _ _ properties methods _ _) = do
   -- This is the moc step; metaData is equivalent to the
   -- qt_meta_data_<TYPE> array that moc produces.  metaStrData is
   -- equivalent to qt_meta_stringdata_<TYPE>.
@@ -218,145 +205,26 @@ interleave :: [a] -> [a] -> [a]
 interleave [] ys = ys
 interleave (x:xs) ys = x : ys `interleave` xs
 
--- | This type is used to monadically build up the list of properties
--- and methods.  This should be expanded later to handle Constructors.
--- Maybe Constructors are just Methods with a flag?
-data DefClass tt a = DefClass [Method tt] [Property tt] a
-
-instance Monad (DefClass tt) where
-  (DefClass ms ps v) >>= f =
-    let (DefClass ms' ps' v') = f v in DefClass (ms'++ms) (ps'++ps) v'
-  return v = DefClass [] [] v
-
 --
 -- Method
 --
 
--- | Represents a named method which can be invoked from QML on an object of
--- type @tt@.
-data Method tt =
-  Method { methodName  :: String -- ^ The name of the 'Method'
-         , methodTypes :: [TypeName] -- ^ Gets the 'TypeName's which
-                                    -- comprise the signature of a
-                                    -- 'Method'.  The head of the list
-                                    -- is the return type and the tail
-                                    -- the arguments.
-         , methodFunc  :: UniformFunc
-         }
-
--- | Base helper to monadically define a 'Method'
-defMethod :: Method tt -> DefClass tt ()
-defMethod m = DefClass [m] [] ()
-
--- FIXME: Replace these with TemplateHaskell
-
--- | Defines a named method using an impure nullary function.
-defMethod0 :: forall tt tr. (MetaObject tt, Marshallable tr)
-              => String -- ^ Name of the method
-              -> (tt -> IO tr) -- ^ The Haskell function to call.  The
-                             -- object is the parameter.
-              -> DefClass tt ()
-defMethod0 name f =
-  defMethod Method { methodName = name
-                   , methodTypes = [ mTypeOf (undefined :: tr) ]
-                   , methodFunc = marshalFunc0 m
-                   }
-  where
-    m p0 pr = unmarshal p0 >>= f >>= marshalRet pr
-
--- | Defines a named method using an impure unary function.
-defMethod1 :: forall tt t1 tr. (MetaObject tt, Marshallable t1, Marshallable tr)
-              => String -- ^ Name of the method
-              -> (tt -> t1 -> IO tr) -- ^ The Haskell function to call
-              -> DefClass tt ()
-defMethod1 name f =
-  defMethod Method { methodName = name
-                   , methodTypes = [ mTypeOf (undefined :: tr) , mTypeOf (undefined :: t1) ]
-                   , methodFunc = marshalFunc1 m
-                   }
-  where
-    m p0 p1 pr = do
-      v0 <- unmarshal p0
-      v1 <- unmarshal p1
-      f v0 v1 >>= marshalRet pr
-
--- | Defines a named method using an impure binary function.
-defMethod2 :: forall tt t1 t2 tr.
-  (MetaObject tt, Marshallable t1, Marshallable t2, Marshallable tr)
-  => String -- ^ Method name
-  -> (tt -> t1 -> t2 -> IO tr) -- ^ Haskell function to call
-  -> DefClass tt ()
-defMethod2 name f =
-  defMethod Method { methodName = name
-                   , methodTypes = [ mTypeOf (undefined :: tr)
-                                   , mTypeOf (undefined :: t1)
-                                   , mTypeOf (undefined :: t2)
-                                   ]
-                   , methodFunc = marshalFunc2 m
-                   }
-  where
-    m p0 p1 p2 pr = do
-      v0 <- unmarshal p0
-      v1 <- unmarshal p1
-      v2 <- unmarshal p2
-      f v0 v1 v2 >>= marshalRet pr
-
--- | Defines a named method using an impure function taking 3 arguments.
-defMethod3 :: forall tt t1 t2 t3 tr.
-  (MetaObject tt, Marshallable t1, Marshallable t2, Marshallable t3, Marshallable tr)
-  => String
-  -> (tt -> t1 -> t2 -> t3 -> IO tr)
-  -> DefClass tt ()
-defMethod3 name f =
-  defMethod Method { methodName = name
-                   , methodTypes = [ mTypeOf (undefined :: tr)
-                                   , mTypeOf (undefined :: t1)
-                                   , mTypeOf (undefined :: t2)
-                                   , mTypeOf (undefined :: t3)
-                                   ]
-                   , methodFunc = marshalFunc3 m
-                   }
-  where
-    m p0 p1 p2 p3 pr = do
-      v0 <- unmarshal p0
-      v1 <- unmarshal p1
-      v2 <- unmarshal p2
-      v3 <- unmarshal p3
-      f v0 v1 v2 v3 >>= marshalRet pr
+defMethod :: String -> Name -> ProtoClassMethod
+defMethod = PMethod
 
 --
 -- Property
 --
 
--- | Represents a named property which can be accessed from QML on an object
--- of type @tt@.
-data Property tt =
-  Property { propertyName :: String
-           , propertyType :: TypeName
-           , propertyReadFunc :: UniformFunc
-           , propertyWriteFunc :: Maybe UniformFunc
-           , propertyFlags :: [CUInt]
-           }
-
--- | Helper to monadically define properties
-defProperty :: Property tt -> DefClass tt ()
-defProperty p = DefClass [] [p] ()
-
 -- | Defines a named read-only property using an impure
 -- accessor function.
-defPropertyRO :: forall tt tr. (MetaObject tt, Marshallable tr)
-                 => String -- ^ Property name
-                 -> (tt -> IO tr) -- ^ Property accessor
-                 -> DefClass tt ()
+defPropertyRO :: String -> Name -> ProtoClassProperty
 defPropertyRO name g =
-  defProperty Property { propertyName = name
-                       , propertyType = mTypeOf (undefined :: tr)
-                       , propertyReadFunc = marshalFunc0 accessor
-                       , propertyWriteFunc = Nothing
-                       , propertyFlags = [pfScriptable, pfReadable, pfStored]
-                       }
-  where
-    accessor p0 pr = unmarshal p0 >>= g >>= marshal pr
+  PProperty { pPropertyName = name
+            , pPropertyReadFunc = g
+            , pPropertyWriteFunc = Nothing
+            , pPropertyFlags = [pfScriptable, pfReadable, pfStored]
+            }
 
 -- | Defines a named read-write property using a pair of
 -- impure accessor and mutator functions.
@@ -368,59 +236,28 @@ defPropertyRO name g =
 -- is just [arg1] since there is never a return value for property
 -- writes.  This means that the writer function has to be marshalled
 -- with marshalFunc0 here.
-defPropertyRW :: forall tt tr. (MetaObject tt, Marshallable tr)
-                 => String -- ^ Property name
-                 -> (tt -> IO tr) -- ^ Property accessor
-                 -> (tt -> tr -> IO ()) -- ^ Property mutator
-                 -> DefClass tt ()
+defPropertyRW :: String -> Name -> Name -> ProtoClassProperty
 defPropertyRW name g s =
-  defProperty Property { propertyName = name
-                       , propertyType = mTypeOf (undefined :: tr)
-                       , propertyReadFunc = marshalFunc0 accessor
-                       , propertyWriteFunc = Just (marshalFunc0 writer)
-                       , propertyFlags = [pfScriptable, pfReadable, pfWritable, pfStored]
-                       }
-  where
-    accessor p0 pr = do
-      v0 <- unmarshal p0
-      r <- g v0
-      marshal pr r
-    writer p0 p1 = do
-      v0 <- unmarshal p0
-      v1 <- unmarshal p1
-      s v0 v1
+  PProperty { pPropertyName = name
+            , pPropertyReadFunc = g
+            , pPropertyWriteFunc = Just s
+            , pPropertyFlags = [pfScriptable, pfReadable, pfWritable, pfStored]
+            }
 
 --
 -- Marshaling functions
 --
 
-marshalFunc0 :: (Ptr () -> Ptr () -> IO ()) -> UniformFunc
-marshalFunc0 f p0 pv = do
-  pr <- peekElemOff pv 0
-  f p0 pr
 
-marshalFunc1 :: (Ptr () -> Ptr () -> Ptr () -> IO ()) -> UniformFunc
-marshalFunc1 f p0 pv = do
-  pr <- peekElemOff pv 0
-  p1 <- peekElemOff pv 1
-  f p0 p1 pr
+marshalMutator :: (Marshallable a, Marshallable b)
+                  => (a -> b -> IO ())
+                  -> UniformFunc
+marshalMutator f p0 pv = do
+  p1 <- peekElemOff pv 0
+  v0 <- unmarshal p0
+  v1 <- unmarshal p1
+  f v0 v1
 
-marshalFunc2 ::
-  (Ptr () -> Ptr () -> Ptr () -> Ptr () -> IO ()) -> UniformFunc
-marshalFunc2 f p0 pv = do
-  pr <- peekElemOff pv 0
-  p1 <- peekElemOff pv 1
-  p2 <- peekElemOff pv 2
-  f p0 p1 p2 pr
-
-marshalFunc3 ::
-  (Ptr () -> Ptr () -> Ptr () -> Ptr () -> Ptr () -> IO ()) -> UniformFunc
-marshalFunc3 f p0 pv = do
-  pr <- peekElemOff pv 0
-  p1 <- peekElemOff pv 1
-  p2 <- peekElemOff pv 2
-  p3 <- peekElemOff pv 3
-  f p0 p1 p2 p3 pr
 
 marshalRet :: (Marshallable tt) => Ptr () -> tt -> IO ()
 marshalRet ptr obj
@@ -503,7 +340,7 @@ writeString str = do
 -- FIXME: This seems to be missing the tag - it isn't really clear
 -- what the tag is supposed to be, but it should probably be
 -- included...
-writeMethod :: Method tt -> State MOCState ()
+writeMethod :: Method -> State MOCState ()
 writeMethod m = do
   idx <- get >>= return . mDataLen
   writeString $ methodSignature m
@@ -519,7 +356,7 @@ writeMethod m = do
 
 -- | Write a property into the property table of mData.  Each
 -- component has three fields: name, type, flags.
-writeProperty :: Property tt -> State MOCState ()
+writeProperty :: Property -> State MOCState ()
 writeProperty p = do
   idx <- get >>= return . mDataLen
   writeString $ propertyName p
@@ -530,8 +367,7 @@ writeProperty p = do
   -- and it doesn't seem to affect functionality.  This could be
   -- changed a bit later... there are some hard-coded values in moc
   -- and otherwise there is some computation by QMetaType::type.
-  let flags = foldr (.|.) pfInvalid (propertyFlags p)
-  writeInt flags
+  writeInt (propertyFlags p) -- flags
   st <- get
   put st { mDataPropsIdx = mplus (mDataPropsIdx st) (Just idx) }
   return ()
@@ -540,7 +376,7 @@ writeProperty p = do
 --
 -- FIXME: The format is currently hard-coded as 5 (qt 4.7).  qt 4.8 is
 -- at 6.
-compileClass :: String -> [Method tt] -> [Property tt] -> MOCOutput
+compileClass :: String -> [Method] -> [Property] -> MOCOutput
 compileClass name ms ps =
   let enc = flip execState newMOCState $ do
         writeInt 5                           -- Revision (Qt 4.7)
@@ -568,7 +404,7 @@ foldr0 f _ xs = foldr1 f xs
 -- | Method signatures are the method name followed by a
 -- comma-separated list of parameter types enclodes in a set of
 -- parens.
-methodSignature :: Method tt -> String
+methodSignature :: Method -> String
 methodSignature method =
   let paramTypes = tail $ methodTypes method
   in (showString (methodName method) . showChar '(' .
@@ -577,7 +413,7 @@ methodSignature method =
 
 -- | moc stores the method parameter list as a comma-separated (with
 -- no spaces) list of the parameter names.
-methodParameters :: Method tt -> String
+methodParameters :: Method -> String
 methodParameters method =
   replicate (flip (-) 2 $ length $ methodTypes method) ','
 

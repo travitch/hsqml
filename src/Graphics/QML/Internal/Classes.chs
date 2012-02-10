@@ -10,10 +10,10 @@ import Foreign.Ptr
 import Foreign.ForeignPtr
 import Foreign.StablePtr
 
+import Graphics.QML.Internal.Primitive
+
 #include "hsqml.h"
 
-type UniformFunc = Ptr () -> Ptr (Ptr ()) -> IO ()
-type PlacementFunc = Ptr () -> IO ()
 
 foreign import ccall "wrapper"
   marshalFunc :: UniformFunc -> IO (FunPtr UniformFunc)
