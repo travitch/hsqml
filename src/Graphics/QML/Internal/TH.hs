@@ -143,7 +143,7 @@ trProperties ps = mapM trProp ps >>= (return . ListE)
       return $! LetE [dec] (AppE mfunc (VarE n))
     maybeMkUniformFunc Nothing = return $! ConE (mkName "Nothing")
     maybeMkUniformFunc (Just n) = do
-      let mfunc = VarE (mkName "marshalMutator")
+      let mfunc = VarE (mkName "hsqmlMarshalMutator")
       return $! AppE (ConE (mkName "Just")) (AppE mfunc (VarE n))
 
 -- | Translate a ProtoMethod to an Exp representing its equivalent
@@ -264,7 +264,7 @@ buildSignal clsName (signo, (PSignal name ts)) = do
   marshalAndCallName <- newName "marshalAndCall"
   let szRef = VarE szName
       marshalAndCall = VarE marshalAndCallName
-  let body0 = AppE (VarE (mkName "qmlAllocaBytes")) szRef
+  let body0 = AppE (VarE (mkName "hsqmlAllocaBytes")) szRef
       body1 = AppE body0 marshalAndCall
 
       szDef = ValD (VarP szName) (NormalB $ ListE $ map mkSizeOf argVars) []
@@ -320,6 +320,8 @@ hsqmlPlusPtr = plusPtr
 hsqmlPeekElemOff :: (Storable a) => Ptr a -> Int -> IO a
 hsqmlPeekElemOff = peekElemOff
 
+-- | Builds a marshaller from Haskell function with the given arity to
+-- a UniformFunc (which can be called by Qt).
 defMarshalFunc :: Int -> Q Dec
 defMarshalFunc i = do
   r <- newName "r"
@@ -344,7 +346,7 @@ defMarshalFunc i = do
 
   return $! FunD name [cls]
   where
-    marRet = VarE (mkName "marshalRet")
+    marRet = VarE (mkName "hsqmlMarshalRet")
     peekOff = VarE (mkName "hsqmlPeekElemOff")
     unmar = VarE (mkName "unmarshal")
     mkPeek pv ix =

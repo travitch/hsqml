@@ -38,8 +38,10 @@ module Graphics.QML.Types.Classes (
   Marshallable(..),
 
   -- * Methods
-
   defMethod,
+
+  -- * Signals
+  defSignal,
 
   -- * Properties
   defPropertyRO,
@@ -52,9 +54,10 @@ module Graphics.QML.Types.Classes (
   -- * Internal
   Property(..),
   Method(..),
+  Signal(..),
   InternalClassDefinition(..),
-  marshalRet,
-  marshalMutator,
+  hsqmlMarshalRet,
+  hsqmlMarshalMutator,
   hsqmlAllocaBytes,
   hsqmlPeekElemOff,
   hsqmlPlusPtr,
@@ -96,10 +99,6 @@ import System.IO.Unsafe
 -- A 'Marshallable' instance is provided automatically for all instances of
 -- this class, however, 'defClass' must be used to define an object's class
 -- members before marshalling any values.
---
--- FIXME: Provide an alternate version of this based on
--- TemplateHaskell to push the Haskell-side of the metaclass creation
--- to compile time (like moc).
 class (Typeable tt) => MetaObject tt where
   classDefinition :: InternalClassDefinition tt
 
@@ -216,6 +215,13 @@ defMethod :: String -> Name -> ProtoClassMethod
 defMethod = PMethod
 
 --
+-- Signal
+--
+
+defSignal :: String -> [Name] -> ProtoSignal
+defSignal = PSignal
+
+--
 -- Property
 --
 
@@ -252,18 +258,18 @@ defPropertyRW name g s =
 --
 
 
-marshalMutator :: (Marshallable a, Marshallable b)
-                  => (a -> b -> IO ())
-                  -> UniformFunc
-marshalMutator f p0 pv = do
+hsqmlMarshalMutator :: (Marshallable a, Marshallable b)
+                       => (a -> b -> IO ())
+                       -> UniformFunc
+hsqmlMarshalMutator f p0 pv = do
   p1 <- peekElemOff pv 0
   v0 <- unmarshal p0
   v1 <- unmarshal p1
   f v0 v1
 
 
-marshalRet :: (Marshallable tt) => Ptr () -> tt -> IO ()
-marshalRet ptr obj
+hsqmlMarshalRet :: (Marshallable tt) => Ptr () -> tt -> IO ()
+hsqmlMarshalRet ptr obj
   | ptr == nullPtr = return ()
   | otherwise      = marshal ptr obj
 
