@@ -47,7 +47,7 @@ int HsQMLObject::qt_metacall(QMetaObject::Call c, int id, void** a)
     return id;
   }
   if (QMetaObject::InvokeMetaMethod == c) {
-    mKlass->methods()[id](this, a);
+    mKlass->methods()[id - mKlass->mSignalCount](this, a);
     id -= mKlass->mMethodCount;
   }
   else if (QMetaObject::ReadProperty == c) {
@@ -138,8 +138,8 @@ extern "C" void hsqml_register_type(HsQMLPlacementFunc placementAllocator,
 }
 
 extern "C" void hsqml_emit_signal(void* hndl, int signum,
-    void **args)
+    void *args)
 {
   HsQMLObject* obj = (HsQMLObject*)hndl;
-  QMetaObject::activate(obj, &HsQMLObject::staticMetaObject, signum, args);
+  QMetaObject::activate(obj, &HsQMLObject::staticMetaObject, signum, (void**)args);
 }

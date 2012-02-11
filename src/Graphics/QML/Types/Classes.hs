@@ -36,6 +36,7 @@ module Graphics.QML.Types.Classes (
   MetaObject (..),
   ClassDefinition(..),
   Marshallable(..),
+  QPointer,
 
   -- * Methods
   defMethod,
@@ -69,6 +70,7 @@ import Graphics.QML.Internal.Classes
 import Graphics.QML.Internal.Primitive
 import Graphics.QML.Internal.TH
 
+import Data.Char
 import Control.Monad
 import Control.Monad.Trans.State
 import Data.Bits
@@ -88,6 +90,9 @@ import Language.Haskell.TH
 import System.FilePath ( takeExtension )
 #endif
 import System.IO.Unsafe
+
+import Debug.Trace
+debug = flip trace
 
 --
 -- MetaObject
@@ -151,7 +156,7 @@ metaClass = unsafePerformIO $ do
       writeIORef metaClassDb $ Map.insert key mClass db
 
       let placementFunc place = do
-            udata <- ctor
+            udata <- ctor place
             spudata <- newStablePtr udata
             let pudata = castStablePtrToPtr spudata
             withHsQMLClassHandle (classData mClass) $ \h -> do
@@ -174,7 +179,7 @@ createClass :: forall tt. (MetaObject tt)
                => String -- ^ The class name (derived from Typeable usually)
                -> InternalClassDefinition tt
                -> IO (MetaClass tt)
-createClass name (InternalClassDef _ _ properties methods signals _) = do
+createClass name (InternalClassDef _ _ properties methods signals _ _) = do
   -- This is the moc step; metaData is equivalent to the
   -- qt_meta_data_<TYPE> array that moc produces.  metaStrData is
   -- equivalent to qt_meta_stringdata_<TYPE>.
@@ -183,7 +188,8 @@ createClass name (InternalClassDef _ _ properties methods signals _) = do
 
   -- Convert all of the class description stuff into C-compatible
   -- types (arrays of Storable types).
-  metaDataPtr <- newArray metaData
+  metaDataPtr <- newArray metaData `debug`
+                 show (map (map (chr . fromIntegral)) (splitOn (==0) metaStrData))
   metaStrDataPtr <- newArray metaStrData
   methodsPtr <- mapM (marshalFunc . methodFunc) methods >>= newArray
   pReads <- mapM (marshalFunc . propertyReadFunc) properties
@@ -202,7 +208,11 @@ createClass name (InternalClassDef _ _ properties methods signals _) = do
   return $ case hndl of
     Just hndl' -> MetaClass (TypeName name) hndl'
     Nothing    -> error "Failed to create QML class."
-
+splitOn :: (a -> Bool) -> [a] -> [[a]]
+splitOn _ [] = []
+splitOn f l@(x:xs)
+  | f x = splitOn f xs
+  | otherwise = let (h,t) = break f l in h:(splitOn f t)
 interleave :: [a] -> [a] -> [a]
 interleave [] ys = ys
 interleave (x:xs) ys = x : ys `interleave` xs
@@ -370,8 +380,8 @@ writeSignal s = do
   idx <- get >>= return . mDataLen
   writeString $ signalSignature s
   writeString $ signalParameters s
-  writeString $ typeName $ head $ signalArgTypes s
-  writeString $ typeName $ head $ signalArgTypes s
+  writeString "" -- $ typeName $ head $ signalArgTypes s
+  writeString "" -- $ typeName $ head $ signalArgTypes s
   writeInt (mfAccessProtected .|. mfMethodSignal)
   st <- get
   put st { mDataMethodsIdx = mplus (mDataMethodsIdx st) (Just idx) }
@@ -406,7 +416,7 @@ compileClass name ss ms ps =
         writeInt 5                           -- Revision (Qt 4.7)
         writeString name                     -- Class name
         writeInt 0 >> writeInt 0             -- Class info
-        writeInt $ fromIntegral $ length ms  -- Methods
+        writeInt $ fromIntegral $ (length ms + length ss) -- Methods
         writeInt $ fromIntegral $
           fromMaybe 0 $ mDataMethodsIdx enc  -- Methods (data index)
         writeInt $ fromIntegral $ length ps  -- Properties
@@ -439,7 +449,7 @@ methodSignature method =
 signalSignature :: Signal -> String
 signalSignature sig =
   let ts = signalArgTypes sig
-  in (showString (signalName sig) . showChar '.' .
+  in (showString (signalName sig) . showChar '(' .
        foldr0 (\l r -> l . showChar ',' . r) id
          (map (showString . typeName) ts) . showChar ')') ""
 
@@ -449,9 +459,10 @@ methodParameters :: Method -> String
 methodParameters method =
   replicate (flip (-) 2 $ length $ methodTypes method) ','
 
+-- Signals do not have a this parameter
 signalParameters :: Signal -> String
 signalParameters sig =
-  replicate (flip (-) 2 $ length $ signalArgTypes sig) ','
+  replicate (flip (-) 1 $ length $ signalArgTypes sig) ','
 
 -- TH Helpers
 

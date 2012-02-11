@@ -2,6 +2,7 @@
 module Graphics.QML.Internal.TH (
   -- * Types
   ClassDefinition(..),
+  QPointer,
 
   -- * Functions
   defClass,
@@ -27,6 +28,7 @@ import Language.Haskell.TH
 import Graphics.QML.Internal.Primitive
 import Graphics.QML.Internal.Core
 
+type QPointer = Ptr ()
 
 data Property =
   Property { propertyName :: String
@@ -58,7 +60,8 @@ data ClassDefinition = ClassDef {
   classProperties :: [ProtoClassProperty],
   classMethods :: [ProtoClassMethod],
   classSignals :: [ProtoSignal],
-  classConstructor :: Name
+  classConstructor :: Name,
+  classSelfAccessor :: Name
   }
 
 data InternalClassDefinition tt = InternalClassDef {
@@ -67,7 +70,8 @@ data InternalClassDefinition tt = InternalClassDef {
   _classProperties :: [Property],
   _classMethods :: [Method],
   _classSignals :: [Signal],
-  _classConstructor :: IO tt
+  _classConstructor :: QPointer -> IO tt,
+  _classSelfAccessor :: tt -> QPointer
   }
 
 -- | This function takes a declarative class description (via the
@@ -111,8 +115,16 @@ translateDef pcd = do
       methField = (mkName "_classMethods", tms)
       propField = (mkName "_classProperties", tprops)
       consField = (mkName "_classConstructor", VarE (classConstructor pcd))
+      accField = (mkName "_classSelfAccessor", VarE (classSelfAccessor pcd))
 
-      flds = [uriField, verField, sigField, methField, propField, consField]
+      flds = [ uriField
+             , verField
+             , sigField
+             , methField
+             , propField
+             , consField
+             , accField
+             ]
 
   return $! RecConE cdName flds
   where
@@ -160,9 +172,6 @@ trMethods ms = mapM trMeth ms >>= return . ListE
       VarI _ t _ _ <- reify mref
       let (argTypes, rTypeIO) = splitTypes t
           rType = removeIOWrapper rTypeIO
-      runIO (putStrLn qname)
-      runIO (putStrLn (show argTypes))
-      runIO (putStrLn (pprint t))
       let c1 = AppE (ConE (mkName "Method")) (LitE (StringL qname))
           -- Use tail on argTypes so that we can drop the this pointer
           -- (which isn't counted in qt method descriptions).
@@ -245,7 +254,11 @@ mkFunType = foldr addT iot -- (AppT ArrowT iot)
 -- >       let p2 = plusPtr (mSizeOf v1) p1
 -- >       marshal p2 v2
 -- >       ..
--- >       hsqmlEmitSignal self signum p0
+-- >       hsqmlEmitSignal (_classSelfAccessor self) signum p0
+--
+-- The extra accessor is to get the pointer to the underlying QObject
+-- instead of the Haskell-side user data.  This pointer is required
+-- for the signal dispatch.
 buildSignal :: Name -> (Int, ProtoSignal) -> Q [Dec]
 buildSignal clsName (signo, (PSignal name ts)) = do
   let sigTy = appT (appT arrowT (conT clsName)) (return (mkFunType ts))
@@ -267,6 +280,8 @@ buildSignal clsName (signo, (PSignal name ts)) = do
       body0 = appE (varE (mkName "hsqmlAllocaBytes")) szRef
       body1 = appE body0 marshalAndCall
 
+      -- The size is the sum of all of the sizes of the arguments (we
+      -- need this to compute the size of the buffer to allocate).
       sumFunc = varE (mkName "sum")
       szBody = appE sumFunc $ listE $ map mkSizeOf argVars
       szDef = valD (varP szName) (normalB szBody) []
@@ -311,7 +326,9 @@ mkMarshalAndCall signo mname self vs = do
     mkEmit p0Name =
       let emit = varE (mkName "hsqmlEmitSignal")
           sigEx = litE (integerL (fromIntegral signo))
-      in noBindS $ appE (appE (appE emit self) sigEx) (varE p0Name)
+          accFunc = appE (varE (mkName "_classSelfAccessor")) (varE (mkName "classDefinition"))
+          selfToPtr = appE accFunc self
+      in noBindS $ appE (appE (appE emit selfToPtr) sigEx) (varE p0Name)
 
 hsqmlAllocaBytes :: Int -> (Ptr a -> IO b) -> IO b
 hsqmlAllocaBytes = allocaBytes

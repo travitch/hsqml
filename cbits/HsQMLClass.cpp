@@ -25,6 +25,7 @@ HsQMLClass::HsQMLClass(
   , mProperties(properties)
   , mMethodCount(metaData[MD_METHOD_COUNT])
   , mPropertyCount(metaData[MD_PROPERTY_COUNT])
+  , mSignalCount(metaData[MD_SIGNAL_COUNT])
   , mMetaObject(QMetaObject {{
       &QObject::staticMetaObject,
       mMetaStrData,

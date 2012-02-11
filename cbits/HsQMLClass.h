@@ -10,6 +10,7 @@ enum MDFields {
   MD_CLASS_NAME     = 1,
   MD_METHOD_COUNT   = 4,
   MD_PROPERTY_COUNT = 6,
+  MD_SIGNAL_COUNT = 13
 };
 
 class HsQMLClass
@@ -31,6 +32,7 @@ private:
 
 public:
   const int mMethodCount;
+  const int mSignalCount;
   const int mPropertyCount;
   const QMetaObject mMetaObject;
 };
