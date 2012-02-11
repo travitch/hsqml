@@ -47,6 +47,12 @@ int HsQMLObject::qt_metacall(QMetaObject::Call c, int id, void** a)
     return id;
   }
   if (QMetaObject::InvokeMetaMethod == c) {
+    // We handle methods a bit differently than standard Qt.  When
+    // dispatching a method, subtract out the number of signals from
+    // the id we are passed.  Qt stores both signals and methods in
+    // its methods array, but we don't store signals (they are
+    // completely separate and are not dispatched through the meta
+    // object system).
     mKlass->methods()[id - mKlass->mSignalCount](this, a);
     id -= mKlass->mMethodCount;
   }
