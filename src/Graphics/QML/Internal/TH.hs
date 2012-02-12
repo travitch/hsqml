@@ -239,14 +239,14 @@ buildSignal clsName signo sigName argTypes = do
   marshalAndCallName <- newName "marshalAndCall"
   let szRef = varE szName
       marshalAndCall = varE marshalAndCallName
-      body0 = appE (varE 'hsqmlAllocaBytes) szRef
+      body0 = appE (varE 'allocaBytes) szRef
       body1 = appE body0 marshalAndCall
 
       -- | The size is the sum of all of the sizes of the arguments
       -- (we need this to compute the size of the buffer to allocate).
       --
       -- > nArgs * qmlStorableSizeOf (undefined :: QPointer)
-      sizeOfFunc = varE 'hsqmlStorableSizeOf
+      sizeOfFunc = varE 'sizeOf
       undefVal = varE 'undefined
       ptrType = conT ''QPointer
       ptrSize = appE sizeOfFunc (sigE undefVal ptrType)
@@ -300,9 +300,9 @@ mkMarshalAndCall signo mname self vs = do
   funD mname [defClause]
   where
     mshlFunc = varE 'marshal
-    allocaFunc = varE 'hsqmlAlloca
-    pokeFunc = varE 'hsqmlPokeElemOff
-    castFunc = varE 'hsqmlCastPtr
+    allocaFunc = varE 'alloca
+    pokeFunc = varE 'pokeElemOff
+    castFunc = varE 'castPtr
 
     wrapInArgMarshal p0 (argno, (argName, argTyName)) innerExp = do
       xN <- newName ("x" ++ show argno)
@@ -359,7 +359,7 @@ defMarshalFunc i = do
   return $! FunD name [cls]
   where
     marRet = VarE 'hsqmlMarshalRet
-    peekOff = VarE 'hsqmlPeekElemOff
+    peekOff = VarE 'peekElemOff
     unmar = VarE 'unmarshal
     mkPeek pv ix =
       let p = mkName ("p" ++ show ix)
@@ -406,28 +406,6 @@ mapUntilM f = go []
       case r of
         Nothing -> return acc
         Just r' -> go (r' : acc) es
-
-
--- Functions referenced in TH expansions.  We export them with
--- prefixed names to hopefully avoid collisions with user code.
-
-hsqmlCastPtr :: Ptr a -> Ptr b
-hsqmlCastPtr = castPtr
-
-hsqmlPokeElemOff :: (Storable a) => Ptr a -> Int -> a -> IO ()
-hsqmlPokeElemOff = pokeElemOff
-
-hsqmlAlloca :: (Storable a) => (Ptr a -> IO b) -> IO b
-hsqmlAlloca = alloca
-
-hsqmlAllocaBytes :: Int -> (Ptr a -> IO b) -> IO b
-hsqmlAllocaBytes = allocaBytes
-
-hsqmlPeekElemOff :: (Storable a) => Ptr a -> Int -> IO a
-hsqmlPeekElemOff = peekElemOff
-
-hsqmlStorableSizeOf :: (Storable a) => a -> Int
-hsqmlStorableSizeOf = sizeOf
 
 
 hsqmlMarshalMutator :: (Marshallable a, Marshallable b)
