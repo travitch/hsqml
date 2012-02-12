@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 -- | This module contains the TemplateHaskell helper to define
 -- QObjects, along with supporting data types and helpers used in the
 -- TH expansion.
@@ -8,7 +9,7 @@ module Graphics.QML.Internal.TH (
 
   -- * Functions
   defClass,
-  emitSignal,
+  defSignal,
 
   -- * Internal (used in TH expansions)
   Property(..),
@@ -65,7 +66,6 @@ data ClassDefinition = ClassDef {
   classURI :: String,
   classProperties :: [ProtoClassProperty],
   classMethods :: [ProtoClassMethod],
-  classSignals :: [Name], -- [ProtoSignal],
   classConstructor :: Name,
   classSelfAccessor :: Name
   }
@@ -101,27 +101,20 @@ defClass cd = do
       itype = AppT (ConT (mkName "MetaObject")) (ConT clsName)
       instanceDec = InstanceD [] itype [clsDef]
 
-  -- The only other thing we need to do is define functions for each
-  -- signal.
-  --
-  -- > signalName :: tt -> t1 -> t2 -> .. -> IO ()
-  sigDefs <- mapM (buildSignal clsName) (zip [0..] (classSignals cd))
-
-  return $! instanceDec : concat sigDefs
+  return $! [instanceDec]
 
 translateDef :: ClassDefinition -> Q Exp
 translateDef pcd = do
-  tms <- trMethods (classMethods pcd)
-  tprops <- trProperties (classProperties pcd)
+  definedSignals <- signalsForType (className pcd)
   let (majV, minV) = classVersion pcd
-      cdName = mkName "InternalClassDef"
-      uriField = (mkName "_classURI", LitE (StringL (classURI pcd)))
-      verField = (mkName "_classVersion", TupE [mkIntLit majV, mkIntLit minV])
-      sigField = (mkName "_classSignals", trSigs (classSignals pcd))
-      methField = (mkName "_classMethods", tms)
-      propField = (mkName "_classProperties", tprops)
-      consField = (mkName "_classConstructor", VarE (classConstructor pcd))
-      accField = (mkName "_classSelfAccessor", VarE (classSelfAccessor pcd))
+      cdName = 'InternalClassDef
+      uriField = fieldExp '_classURI (litE (stringL (classURI pcd)))
+      verField = fieldExp '_classVersion (tupE [mkIntLit majV, mkIntLit minV])
+      sigField = fieldExp '_classSignals (trSigs definedSignals)
+      methField = fieldExp '_classMethods (trMethods (classMethods pcd))
+      propField = fieldExp '_classProperties (trProperties (classProperties pcd))
+      consField = fieldExp '_classConstructor (varE (classConstructor pcd))
+      accField = fieldExp '_classSelfAccessor (varE (classSelfAccessor pcd))
 
       flds = [ uriField
              , verField
@@ -132,10 +125,10 @@ translateDef pcd = do
              , accField
              ]
 
-  return $! RecConE cdName flds
+  recConE cdName flds
   where
-    mkIntLit :: Int -> Exp
-    mkIntLit = LitE . IntegerL . fromIntegral
+    mkIntLit :: Int -> Q Exp
+    mkIntLit = litE . integerL . fromIntegral
 
 trProperties :: [ProtoClassProperty] -> Q Exp
 trProperties ps = mapM trProp ps >>= (return . ListE)
@@ -220,30 +213,50 @@ removeIOWrapper t = error ("Illegal type (not wrapped in IO): " ++ pprint t)
 
 -- | Convert a ProtoSignal to an Exp representing a Signal to be
 -- spliced into the ClassDefinition
-trSigs :: [ProtoSignal] -> Exp
-trSigs = ListE . map trSig
+trSigs :: [Info] -> Q Exp
+trSigs = listE . map trSig
   where
-    -- | Convert a ProtoSignal descriptor to a Signal descriptor; this
-    -- mostly involves translating the named types to TypeNames.
-    trSig (PSignal name ts) =
-      let c1 = AppE (ConE (mkName "Signal")) (LitE (StringL name))
-          tns = ListE (map trType ts)
-      in AppE c1 tns
-    -- | Take a type name and make an expression of type TypeName:
-    --
-    -- > mkTypeOf (undefined :: tt)
-    --
-    -- where @tt@ is the name of the type passed in.
-    trType :: Name -> Exp
-    trType name =
-      let uv = SigE (VarE (mkName "undefined")) (ConT name)
-      in AppE (VarE (mkName "mTypeOf")) uv
+    -- | Convert the Info object from a Signal into a Signal
+    -- constructor call
+    trSig (VarI sigName sigTy _ _) = do
+      let (ts, _) = splitTypes sigTy
+          c1 = appE (conE 'Signal) (litE (stringL (nameBase sigName)))
+          tns = listE (map trType (tail ts))
+      appE c1 tns
+    trSig i = error ("Expected variable info: " ++ show i)
+    -- Convert a type to a runtime type in terms of mTypeOf
+    trType :: Type -> Q Exp
+    trType t =
+      let uv = sigE (varE 'undefined) (return t)
+      in appE (varE 'mTypeOf) uv
+
+--
+-- Signal definitions
+--
+
+-- | Define a signal
+--
+-- > defSignal ''ClassName "signalName" [''Int, ''Int, ''String]
+--
+-- defines a signal for ClassName that takes three arguments.
+--
+-- This function actually defines two things.  The first is the
+-- internal actual definition of the signal and the second is the
+-- user-facing version that references it.
+--
+-- > qmlInternalSignal[ClassName]_N = ...
+-- > signalName = qmlInternalSignal[ClassName]_N
+defSignal :: Name -> String -> [Name] -> Q [Dec]
+defSignal clsName sigName argTypes = do
+  currentSignals <- signalsForType clsName
+  let signo = length currentSignals
+  buildSignal clsName signo (mkName sigName) argTypes
+
 
 mkFunType :: [Name] -> Type
-mkFunType = foldr addT iot -- (AppT ArrowT iot)
+mkFunType = foldr addT iot
   where
     addT t acc = AppT (AppT ArrowT (ConT t)) acc
-    -- addT t acc = AppT ArrowT $ AppT (ConT t) acc
     iot = AppT (ConT (mkName "IO")) (TupleT 0)
 
 -- | Builds a function to emit a signal.  It is of the form:
@@ -253,28 +266,23 @@ mkFunType = foldr addT iot -- (AppT ArrowT iot)
 -- >   allocaBytes sz marshalAndCall
 -- >   where
 -- >     sz = (length vs) * sizeof(nullPtr)
--- >     marshalAndCall p0 = do
--- >       alloca $ \x0 -> do
--- >         marshal x0 v0
--- >         pokeElemOff p0 0 x0
--- >         alloca $ \x1 -> do
--- >           marshal x1 v1
--- >           pokeElemOff p0 1 x1
--- >           ..
--- >           hsqmlEmitSignal (_classSelfAccessor self) signum p0
+-- >     marshalAndCall p0 = ...
 --
 -- The extra accessor is to get the pointer to the underlying QObject
 -- instead of the Haskell-side user data.  This pointer is required
 -- for the signal dispatch.
-buildSignal :: Name -> (Int, ProtoSignal) -> Q [Dec]
-buildSignal clsName (signo, (PSignal name ts)) = do
-  let sigTy = appT (appT arrowT (conT clsName)) (return (mkFunType ts))
+buildSignal :: Name -> Int -> Name -> [Name] -> Q [Dec]
+buildSignal clsName signo sigName argTypes = do
+  -- This is the internal signal name, tagged with its number for
+  -- lookup later.
+  let sigInternalName = mkName (signalBaseName clsName ++ show signo)
+  let sigTy = appT (appT arrowT (conT clsName)) (return (mkFunType argTypes))
 
       -- Make a list of variables self v0..vn where self will be the
       -- this ptr
       ixs :: [Int]
       ixs = [0..]
-      argVars = take (length ts) $ map (\i -> mkName ("v" ++ show i)) ixs
+      argVars = take (length argTypes) $ map (\i -> mkName ("v" ++ show i)) ixs
       cpatt = varP (mkName "self") : map varP argVars
 
   -- The body of the signal needs to eventually call hsqmlEmitSignal;
@@ -296,57 +304,58 @@ buildSignal clsName (signo, (PSignal name ts)) = do
       ptrType = conT (mkName "QPointer")
       ptrSize = appE sizeOfFunc (sigE undefVal ptrType)
       mulOp = varE (mkName "*")
-      nSlots = litE (integerL (fromIntegral (length ts)))
+      nSlots = litE (integerL (fromIntegral (length argTypes)))
       szBody = infixApp ptrSize mulOp nSlots
       szDef = valD (varP szName) (normalB szBody) []
 
-      argsWithTypes = zip argVars ts
+      argsWithTypes = zip argVars argTypes
       mshDef = mkMarshalAndCall signo marshalAndCallName (varE (mkName "self")) argsWithTypes
 
-  sig <- sigD (mkName name) sigTy
-  fdef <- funD (mkName name) [clause cpatt (normalB body1) [szDef, mshDef]]
-  return [sig, fdef]
-  where
-    mSizeOfRef = varE (mkName "mSizeOf")
-    mkSizeOf v = appE mSizeOfRef (varE v)
+  internalSig <- sigD sigInternalName sigTy
+  internalDef <- funD sigInternalName [clause cpatt (normalB body1) [szDef, mshDef]]
+  externSig <- sigD sigName sigTy
+  externDef <- funD sigName [clause [] (normalB (varE sigInternalName)) []]
+
+  return [internalSig, internalDef, externSig, externDef]
+
 
 -- | Make a function that takes a pointer to an allocated array of
 -- pointers.  Fills the array with pointers to allocad memory and then
--- passes the filled array to hsqmlEmitSignal
+-- passes the filled array to hsqmlEmitSignal.
+--
+-- >     marshalAndCall p0 = do
+-- >       alloca $ \x0 -> do
+-- >         let x0t = (x0 :: Ptr t0)
+-- >         marshal x0t v0
+-- >         pokeElemOff p0 0 x0t
+-- >         alloca $ \x1 -> do
+-- >           let x1t = (x1 :: Ptr t1)
+-- >           marshal x1t v1
+-- >           pokeElemOff p0 1 x1t
+-- >           ..
+-- >           hsqmlEmitSignal (_classSelfAccessor self) signum p0
+--
+-- Note the extra let bindings in each alloca.  These are needed to
+-- fix the type of the allocated pointer (since alloca allocates a
+-- pointer to a particular type).  We can't use a simple type
+-- annotation on the lambda argument without forcing users to enable
+-- ScopedTypeVariables in each source file, so this is the simplest
+-- approach.
 mkMarshalAndCall :: Int -> Name -> ExpQ -> [(Name, Name)] -> DecQ
 mkMarshalAndCall signo mname self vs = do
   p0Name <- newName "vec"
-  let body = doE [foldr (wrapInArgMarshal p0Name) (mkEmit p0Name) (zip [0..] vs)]
+  -- Start by generating the innermost statement (the call to
+  -- hsqmlEmitSignal) and then just wrap
+  let ixs :: [Int]
+      ixs = [0..]
+      body = doE [foldr (wrapInArgMarshal p0Name) (mkEmit p0Name) (zip ixs vs)]
       defClause = clause [varP p0Name] (normalB body) []
   funD mname [defClause]
-  {-
---  pNames@(p0Name:_) <- mapM (\ix -> newName ("p" ++ show ix)) [0..length vs]
-
-  -- Note that the ptr offset bindings (the pN variables) start at p1
-  -- since p0 is the parameter to the function.  The last pN and vN
-  -- are not needed to make these bindings.
-  let ps = map mkPtrOffsetBinding (zip3 (tail pNames) pNames vs)
-      ms = map mkMshl (zip pNames vs)
-      body = normalB $ doE (concat [ ps, ms, [mkEmit p0Name] ])
-      defClause = clause [varP p0Name] body []
-  funD mname [defClause]
--}
   where
     mshlFunc = varE (mkName "marshal")
-    szFunc = varE (mkName "mSizeOf")
-    ptrAddFunc = varE (mkName "hsqmlPlusPtr")
     allocaFunc = varE (mkName "hsqmlAlloca")
     pokeFunc = varE (mkName "hsqmlPokeElemOff")
     castFunc = varE (mkName "hsqmlCastPtr")
-    -- >     marshalAndCall p0 = do
--- >       alloca $ \x0 -> do
--- >         marshal x0 v0
--- >         pokeElemOff p0 0 x0
--- >         alloca $ \x1 -> do
--- >           marshal x1 v1
--- >           pokeElemOff p0 1 x1
--- >           ..
--- >           hsqmlEmitSignal (_classSelfAccessor self) signum p0
 
     wrapInArgMarshal p0 (argno, (argName, argTyName)) innerExp = do
       xN <- newName ("x" ++ show argno)
@@ -368,14 +377,6 @@ mkMarshalAndCall signo mname self vs = do
       let ix = litE (integerL (fromIntegral argno))
           castedPtr = appE castFunc (varE xN)
       in noBindS $ appE (appE (appE pokeFunc (varE p0)) ix) castedPtr
-    -- | Make a monadic let binding of the form
-    --
-    -- > let res = plusPtr (mSizeOf v) p
-    mkPtrOffsetBinding (res, p, v) =
-      letS [valD (varP res) (normalB ptrAdd) []]
-      where
-        sz = appE szFunc (varE v)
-        ptrAdd = appE (appE ptrAddFunc (varE p)) sz
     -- | > hsqmlEmitSignal self signo p0
     mkEmit p0Name =
       let emit = varE (mkName "hsqmlEmitSignal")
@@ -421,13 +422,44 @@ defMarshalFunc i = do
           p = mkName ("p" ++ show ix)
       in BindS (VarP v) (AppE unmar (VarE p))
 
--- | Define a signal
+tryReify :: Name -> Q (Maybe Info)
+tryReify name = reify name >>= (return . Just)
+
+signalBaseName :: Name -> String
+signalBaseName clsName = "qmlInternalSignal[" ++ nameBase clsName ++ "]_"
+
+-- | We use a naming convention for the private name of each signal:
 --
--- > defSignal ''ClassName "signalName" [''Int, ''Int, ''String]
+--   qmlInternalSignal[ClassName]_N = realSigDef
+--   signalName = qmlInternalSignal[ClassName]_N
 --
--- defines a signal for ClassName that takes three arguments.
-defSignal :: Name -> String -> [Name] -> Q Dec
-defSignal = undefined
+-- where N is in [0..] (and is the internally used signal number).
+-- This convention lets us look up which signals are defined for the
+-- class so far using lookupValueName.
+signalsForType :: Name -> Q [Info]
+signalsForType clsName = do
+  let sigNumbers :: [Int]
+      sigNumbers = [0..]
+  mapUntilM checkName sigNumbers
+  where
+    baseName = signalBaseName clsName
+    checkName n =
+      let sigName = mkName (baseName ++ show n)
+      in recover (return Nothing) (tryReify sigName)
+
+-- | Applies f to each element in the input list until f returns
+-- Nothing or there are no more list elements.  Returns the list of
+-- Just values
+mapUntilM :: (Monad m) => (a -> m (Maybe b)) -> [a] -> m [b]
+mapUntilM f = go []
+  where
+    go acc [] = return acc
+    go acc (e:es) = do
+      r <- f e
+      case r of
+        Nothing -> return acc
+        Just r' -> go (r' : acc) es
+
 
 -- Functions referenced in TH expansions.  We export them with
 -- prefixed names to hopefully avoid collisions with user code.

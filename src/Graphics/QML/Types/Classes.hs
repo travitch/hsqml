@@ -50,7 +50,6 @@ module Graphics.QML.Types.Classes (
 
   -- * TH Helpers
   defClass,
-  emitSignal,
   registerTypes,
 
   -- * Internal
@@ -233,8 +232,8 @@ defMethod = PMethod
 -- Signal
 --
 
-defSignal :: String -> [Name] -> ProtoSignal
-defSignal = PSignal
+-- defSignal :: String -> [Name] -> ProtoSignal
+-- defSignal = PSignal
 
 --
 -- Property
