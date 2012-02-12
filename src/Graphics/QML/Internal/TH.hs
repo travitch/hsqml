@@ -15,6 +15,8 @@ module Graphics.QML.Internal.TH (
 import Data.Bits
 import Data.IORef
 import Data.List ( foldl' )
+import Data.Map ( Map )
+import qualified Data.Map as M
 
 import Foreign.Marshal.Alloc ( allocaBytes, alloca )
 import Foreign.Ptr ( Ptr, castPtr, nullPtr )
@@ -25,6 +27,20 @@ import System.IO.Unsafe ( unsafePerformIO )
 import Graphics.QML.Internal.Core
 import Graphics.QML.Internal.Classes ( hsqmlEmitSignal )
 
+{-# NOINLINE signalNameMap #-}
+signalNameMap :: IORef (Map String Name)
+signalNameMap = unsafePerformIO $ newIORef M.empty
+
+signalNameRecord :: Name -> Name -> IO ()
+signalNameRecord mangledName realName =
+  modifyIORef signalNameMap (M.insert (nameBase mangledName) realName)
+
+signalNameLookup :: Name -> IO Name
+signalNameLookup n = do
+  m <- readIORef signalNameMap
+  case M.lookup (nameBase n) m of
+    Nothing -> error ("Name not available in signalNameMap: " ++ show n)
+    Just realName -> return realName
 
 -- | This function takes a declarative class description (via the
 -- 'ClassDefinition' type) and converts it into an instance
@@ -164,7 +180,8 @@ trSigs = listE . map trSig
   where
     -- | Convert the Info object from a Signal into a Signal
     -- constructor call
-    trSig (VarI sigName sigTy _ _) = do
+    trSig (VarI sigMangledName sigTy _ _) = do
+      sigName <- runIO $ signalNameLookup sigMangledName
       let (ts, _) = splitTypes sigTy
           c1 = appE (conE 'Signal) (litE (stringL (nameBase sigName)))
           tns = listE (map trType (tail ts))
@@ -263,6 +280,7 @@ buildSignal clsName signo sigName argTypes = do
   externSig <- sigD sigName sigTy
   externDef <- funD sigName [clause [] (normalB (varE sigInternalName)) []]
 
+  runIO $ signalNameRecord sigInternalName sigName
   return [internalSig, internalDef, externSig, externDef]
 
 
