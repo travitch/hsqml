@@ -56,7 +56,7 @@ newClassHandle p =
 {#fun unsafe hsqml_emit_signal as ^
   {id `Ptr ()',
    fromIntegral `Int',
-   id `Ptr ()'} -> `()' #}
+   id `Ptr (Ptr ())'} -> `()' #}
 
 {#pointer *HsQMLObjectHandle as ^ newtype #}
 

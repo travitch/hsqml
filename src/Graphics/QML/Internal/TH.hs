@@ -1,4 +1,6 @@
-{-# LANGUAGE TemplateHaskell #-}
+-- | This module contains the TemplateHaskell helper to define
+-- QObjects, along with supporting data types and helpers used in the
+-- TH expansion.
 module Graphics.QML.Internal.TH (
   -- * Types
   ClassDefinition(..),
@@ -6,6 +8,7 @@ module Graphics.QML.Internal.TH (
 
   -- * Functions
   defClass,
+  emitSignal,
 
   -- * Internal (used in TH expansions)
   Property(..),
@@ -13,16 +16,19 @@ module Graphics.QML.Internal.TH (
   Signal(..),
   InternalClassDefinition(..),
   hsqmlAllocaBytes,
-  hsqmlPlusPtr,
-  hsqmlPeekElemOff
+  hsqmlAlloca,
+  hsqmlCastPtr,
+  hsqmlPokeElemOff,
+  hsqmlPeekElemOff,
+  hsqmlStorableSizeOf
   ) where
 
 import Data.Bits
 import Data.List ( foldl' )
 import Foreign.C.Types
-import Foreign.Marshal.Alloc ( allocaBytes )
-import Foreign.Ptr ( Ptr, plusPtr )
-import Foreign.Storable ( Storable, peekElemOff )
+import Foreign.Marshal.Alloc ( allocaBytes, alloca )
+import Foreign.Ptr ( Ptr, castPtr )
+import Foreign.Storable ( Storable, peekElemOff, pokeElemOff, sizeOf )
 import Language.Haskell.TH
 
 import Graphics.QML.Internal.Primitive
@@ -59,7 +65,7 @@ data ClassDefinition = ClassDef {
   classURI :: String,
   classProperties :: [ProtoClassProperty],
   classMethods :: [ProtoClassMethod],
-  classSignals :: [ProtoSignal],
+  classSignals :: [Name], -- [ProtoSignal],
   classConstructor :: Name,
   classSelfAccessor :: Name
   }
@@ -246,15 +252,16 @@ mkFunType = foldr addT iot -- (AppT ArrowT iot)
 -- > signalName self v0 v1 v2 ... =
 -- >   allocaBytes sz marshalAndCall
 -- >   where
--- >     sz = sum [mSizeOf v0, mSizeOf v1, ..]
+-- >     sz = (length vs) * sizeof(nullPtr)
 -- >     marshalAndCall p0 = do
--- >       marshal p0 v0
--- >       let p1 = plusPtr (mSizeOf v0) p0
--- >       marshal p1 v1
--- >       let p2 = plusPtr (mSizeOf v1) p1
--- >       marshal p2 v2
--- >       ..
--- >       hsqmlEmitSignal (_classSelfAccessor self) signum p0
+-- >       alloca $ \x0 -> do
+-- >         marshal x0 v0
+-- >         pokeElemOff p0 0 x0
+-- >         alloca $ \x1 -> do
+-- >           marshal x1 v1
+-- >           pokeElemOff p0 1 x1
+-- >           ..
+-- >           hsqmlEmitSignal (_classSelfAccessor self) signum p0
 --
 -- The extra accessor is to get the pointer to the underlying QObject
 -- instead of the Haskell-side user data.  This pointer is required
@@ -280,13 +287,21 @@ buildSignal clsName (signo, (PSignal name ts)) = do
       body0 = appE (varE (mkName "hsqmlAllocaBytes")) szRef
       body1 = appE body0 marshalAndCall
 
-      -- The size is the sum of all of the sizes of the arguments (we
-      -- need this to compute the size of the buffer to allocate).
-      sumFunc = varE (mkName "sum")
-      szBody = appE sumFunc $ listE $ map mkSizeOf argVars
+      -- | The size is the sum of all of the sizes of the arguments
+      -- (we need this to compute the size of the buffer to allocate).
+      --
+      -- > nArgs * qmlStorableSizeOf (undefined :: QPointer)
+      sizeOfFunc = varE (mkName "hsqmlStorableSizeOf")
+      undefVal = varE (mkName "undefined")
+      ptrType = conT (mkName "QPointer")
+      ptrSize = appE sizeOfFunc (sigE undefVal ptrType)
+      mulOp = varE (mkName "*")
+      nSlots = litE (integerL (fromIntegral (length ts)))
+      szBody = infixApp ptrSize mulOp nSlots
       szDef = valD (varP szName) (normalB szBody) []
 
-      mshDef = mkMarshalAndCall signo marshalAndCallName (varE (mkName "self")) argVars
+      argsWithTypes = zip argVars ts
+      mshDef = mkMarshalAndCall signo marshalAndCallName (varE (mkName "self")) argsWithTypes
 
   sig <- sigD (mkName name) sigTy
   fdef <- funD (mkName name) [clause cpatt (normalB body1) [szDef, mshDef]]
@@ -295,9 +310,17 @@ buildSignal clsName (signo, (PSignal name ts)) = do
     mSizeOfRef = varE (mkName "mSizeOf")
     mkSizeOf v = appE mSizeOfRef (varE v)
 
-mkMarshalAndCall :: Int -> Name -> ExpQ -> [Name] -> DecQ
+-- | Make a function that takes a pointer to an allocated array of
+-- pointers.  Fills the array with pointers to allocad memory and then
+-- passes the filled array to hsqmlEmitSignal
+mkMarshalAndCall :: Int -> Name -> ExpQ -> [(Name, Name)] -> DecQ
 mkMarshalAndCall signo mname self vs = do
-  pNames@(p0Name:_) <- mapM (\ix -> newName ("p" ++ show ix)) [0..length vs]
+  p0Name <- newName "vec"
+  let body = doE [foldr (wrapInArgMarshal p0Name) (mkEmit p0Name) (zip [0..] vs)]
+      defClause = clause [varP p0Name] (normalB body) []
+  funD mname [defClause]
+  {-
+--  pNames@(p0Name:_) <- mapM (\ix -> newName ("p" ++ show ix)) [0..length vs]
 
   -- Note that the ptr offset bindings (the pN variables) start at p1
   -- since p0 is the parameter to the function.  The last pN and vN
@@ -307,13 +330,44 @@ mkMarshalAndCall signo mname self vs = do
       body = normalB $ doE (concat [ ps, ms, [mkEmit p0Name] ])
       defClause = clause [varP p0Name] body []
   funD mname [defClause]
+-}
   where
     mshlFunc = varE (mkName "marshal")
     szFunc = varE (mkName "mSizeOf")
     ptrAddFunc = varE (mkName "hsqmlPlusPtr")
+    allocaFunc = varE (mkName "hsqmlAlloca")
+    pokeFunc = varE (mkName "hsqmlPokeElemOff")
+    castFunc = varE (mkName "hsqmlCastPtr")
+    -- >     marshalAndCall p0 = do
+-- >       alloca $ \x0 -> do
+-- >         marshal x0 v0
+-- >         pokeElemOff p0 0 x0
+-- >         alloca $ \x1 -> do
+-- >           marshal x1 v1
+-- >           pokeElemOff p0 1 x1
+-- >           ..
+-- >           hsqmlEmitSignal (_classSelfAccessor self) signum p0
+
+    wrapInArgMarshal p0 (argno, (argName, argTyName)) innerExp = do
+      xN <- newName ("x" ++ show argno)
+      xNt <- newName ("x" ++ show argno ++ "t")
+      let ptrTy = appT (conT (mkName "Ptr")) (conT argTyName)
+          argSig = sigD xNt ptrTy
+          argBind = valD (varP xNt) (normalB (varE xN)) []
+          letBind = letS [argSig, argBind]
+          mar = mkMshl xNt argName
+          poke = mkPoke p0 argno xNt
+          doBlock = doE [ letBind, mar, poke, innerExp ]
+      noBindS $ appE allocaFunc (lam1E (varP xN) doBlock)
+
     -- | > marshal p v
-    mkMshl (p, v) =
-      noBindS $ appE (appE mshlFunc (varE p)) (varE v)
+    mkMshl p v =
+      let castedPtr = appE castFunc (varE p)
+      in noBindS $ appE (appE mshlFunc castedPtr) (varE v)
+    mkPoke p0 argno xN =
+      let ix = litE (integerL (fromIntegral argno))
+          castedPtr = appE castFunc (varE xN)
+      in noBindS $ appE (appE (appE pokeFunc (varE p0)) ix) castedPtr
     -- | Make a monadic let binding of the form
     --
     -- > let res = plusPtr (mSizeOf v) p
@@ -329,15 +383,6 @@ mkMarshalAndCall signo mname self vs = do
           accFunc = appE (varE (mkName "_classSelfAccessor")) (varE (mkName "classDefinition"))
           selfToPtr = appE accFunc self
       in noBindS $ appE (appE (appE emit selfToPtr) sigEx) (varE p0Name)
-
-hsqmlAllocaBytes :: Int -> (Ptr a -> IO b) -> IO b
-hsqmlAllocaBytes = allocaBytes
-
-hsqmlPlusPtr :: Ptr a -> Int -> Ptr b
-hsqmlPlusPtr = plusPtr
-
-hsqmlPeekElemOff :: (Storable a) => Ptr a -> Int -> IO a
-hsqmlPeekElemOff = peekElemOff
 
 -- | Builds a marshaller from Haskell function with the given arity to
 -- a UniformFunc (which can be called by Qt).
@@ -375,3 +420,32 @@ defMarshalFunc i = do
       let v = mkName ("v" ++ show ix)
           p = mkName ("p" ++ show ix)
       in BindS (VarP v) (AppE unmar (VarE p))
+
+-- | Define a signal
+--
+-- > defSignal ''ClassName "signalName" [''Int, ''Int, ''String]
+--
+-- defines a signal for ClassName that takes three arguments.
+defSignal :: Name -> String -> [Name] -> Q Dec
+defSignal = undefined
+
+-- Functions referenced in TH expansions.  We export them with
+-- prefixed names to hopefully avoid collisions with user code.
+
+hsqmlCastPtr :: Ptr a -> Ptr b
+hsqmlCastPtr = castPtr
+
+hsqmlPokeElemOff :: (Storable a) => Ptr a -> Int -> a -> IO ()
+hsqmlPokeElemOff = pokeElemOff
+
+hsqmlAlloca :: (Storable a) => (Ptr a -> IO b) -> IO b
+hsqmlAlloca = alloca
+
+hsqmlAllocaBytes :: Int -> (Ptr a -> IO b) -> IO b
+hsqmlAllocaBytes = allocaBytes
+
+hsqmlPeekElemOff :: (Storable a) => Ptr a -> Int -> IO a
+hsqmlPeekElemOff = peekElemOff
+
+hsqmlStorableSizeOf :: (Storable a) => a -> Int
+hsqmlStorableSizeOf = sizeOf

@@ -50,9 +50,11 @@ module Graphics.QML.Types.Classes (
 
   -- * TH Helpers
   defClass,
+  emitSignal,
   registerTypes,
 
   -- * Internal
+  Ptr,
   Property(..),
   Method(..),
   Signal(..),
@@ -60,8 +62,11 @@ module Graphics.QML.Types.Classes (
   hsqmlMarshalRet,
   hsqmlMarshalMutator,
   hsqmlAllocaBytes,
+  hsqmlAlloca,
   hsqmlPeekElemOff,
-  hsqmlPlusPtr,
+  hsqmlPokeElemOff,
+  hsqmlStorableSizeOf,
+  hsqmlCastPtr,
   hsqmlEmitSignal
 ) where
 
