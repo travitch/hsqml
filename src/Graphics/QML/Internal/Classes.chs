@@ -10,7 +10,7 @@ import Foreign.Ptr
 import Foreign.ForeignPtr
 import Foreign.StablePtr
 
-import Graphics.QML.Internal.Primitive
+import Graphics.QML.Internal.Core
 
 #include "hsqml.h"
 

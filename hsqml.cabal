@@ -36,7 +36,6 @@ Library
     Graphics.QML.Internal.Intrinsics
     Graphics.QML.Internal.Classes
     Graphics.QML.Internal.TH
-    Graphics.QML.Internal.Primitive
   Hs-source-dirs: src
   Cc-options: -std=c++0x
   C-sources:

@@ -9,76 +9,22 @@ module Graphics.QML.Internal.TH (
 
   -- * Functions
   defClass,
-  defSignal,
-
-  -- * Internal (used in TH expansions)
-  Property(..),
-  Method(..),
-  Signal(..),
-  InternalClassDefinition(..),
-  hsqmlAllocaBytes,
-  hsqmlAlloca,
-  hsqmlCastPtr,
-  hsqmlPokeElemOff,
-  hsqmlPeekElemOff,
-  hsqmlStorableSizeOf
+  defSignal
   ) where
 
 import Data.Bits
+import Data.IORef
 import Data.List ( foldl' )
-import Foreign.C.Types
+
 import Foreign.Marshal.Alloc ( allocaBytes, alloca )
-import Foreign.Ptr ( Ptr, castPtr )
+import Foreign.Ptr ( Ptr, castPtr, nullPtr )
 import Foreign.Storable ( Storable, peekElemOff, pokeElemOff, sizeOf )
 import Language.Haskell.TH
+import System.IO.Unsafe ( unsafePerformIO )
 
-import Graphics.QML.Internal.Primitive
 import Graphics.QML.Internal.Core
+import Graphics.QML.Internal.Classes ( hsqmlEmitSignal )
 
-type QPointer = Ptr ()
-
-data Property =
-  Property { propertyName :: String
-           , propertyType :: TypeName
-           , propertyReadFunc :: UniformFunc
-           , propertyWriteFunc :: Maybe UniformFunc
-           , propertyFlags :: CUInt
-           }
-
-data Method =
-  Method { methodName  :: String -- ^ The name of the 'Method'
-         , methodTypes :: [TypeName] -- ^ Gets the 'TypeName's which
-                                    -- comprise the signature of a
-                                    -- 'Method'.  The head of the list
-                                    -- is the return type and the tail
-                                    -- the arguments.
-         , methodFunc  :: UniformFunc
-         }
-
-data Signal =
-  Signal { signalName :: String
-         , signalArgTypes :: [TypeName]
-         }
-
-data ClassDefinition = ClassDef {
-  className :: Name,
-  classVersion :: (Int, Int),
-  classURI :: String,
-  classProperties :: [ProtoClassProperty],
-  classMethods :: [ProtoClassMethod],
-  classConstructor :: Name,
-  classSelfAccessor :: Name
-  }
-
-data InternalClassDefinition tt = InternalClassDef {
-  _classVersion :: (Int, Int),
-  _classURI :: String,
-  _classProperties :: [Property],
-  _classMethods :: [Method],
-  _classSignals :: [Signal],
-  _classConstructor :: QPointer -> IO tt,
-  _classSelfAccessor :: tt -> QPointer
-  }
 
 -- | This function takes a declarative class description (via the
 -- 'ClassDefinition' type) and converts it into an instance
@@ -97,8 +43,8 @@ defClass cd = do
   -- The Marhsal instance for the type will handle actually using this
   -- definition to create and register the type inside of Qt.
   tdef <- translateDef cd
-  let clsDef = ValD (VarP (mkName "classDefinition")) (NormalB tdef) []
-      itype = AppT (ConT (mkName "MetaObject")) (ConT clsName)
+  let clsDef = ValD (VarP 'classDefinition) (NormalB tdef) []
+      itype = AppT (ConT ''MetaObject) (ConT clsName)
       instanceDec = InstanceD [] itype [clsDef]
 
   return $! [instanceDec]
@@ -140,11 +86,11 @@ trProperties ps = mapM trProp ps >>= (return . ListE)
       let (_, propTypeIO) = splitTypes gt
           propType = removeIOWrapper propTypeIO
           flag = foldr (.|.) 0 fs
-          c1 = AppE (ConE (mkName "Property")) (LitE (StringL n))
+          c1 = AppE (ConE 'Property) (LitE (StringL n))
           c2 = AppE c1 (typeToTypeNameExp propType)
       c3 <- (mkUniformFunc g) >>= (return . AppE c2)
       c4 <- (maybeMkUniformFunc s) >>= (return . AppE c3)
-      let flagEx = AppE (VarE (mkName "fromIntegral")) (LitE (IntegerL (fromIntegral flag)))
+      let flagEx = AppE (VarE 'fromIntegral) (LitE (IntegerL (fromIntegral flag)))
           c5 = AppE c4 flagEx
       return c5
     mkUniformFunc n = do
@@ -152,10 +98,10 @@ trProperties ps = mapM trProp ps >>= (return . ListE)
       let mfunc = VarE mfuncName
       dec <- defMarshalFunc 0
       return $! LetE [dec] (AppE mfunc (VarE n))
-    maybeMkUniformFunc Nothing = return $! ConE (mkName "Nothing")
+    maybeMkUniformFunc Nothing = return $! ConE 'Nothing
     maybeMkUniformFunc (Just n) = do
-      let mfunc = VarE (mkName "hsqmlMarshalMutator")
-      return $! AppE (ConE (mkName "Just")) (AppE mfunc (VarE n))
+      let mfunc = VarE 'hsqmlMarshalMutator
+      return $! AppE (ConE 'Just) (AppE mfunc (VarE n))
 
 -- | Translate a ProtoMethod to an Exp representing its equivalent
 -- Method.
@@ -171,7 +117,7 @@ trMethods ms = mapM trMeth ms >>= return . ListE
       VarI _ t _ _ <- reify mref
       let (argTypes, rTypeIO) = splitTypes t
           rType = removeIOWrapper rTypeIO
-      let c1 = AppE (ConE (mkName "Method")) (LitE (StringL qname))
+      let c1 = AppE (ConE 'Method) (LitE (StringL qname))
           -- Use tail on argTypes so that we can drop the this pointer
           -- (which isn't counted in qt method descriptions).
           mtypes = ListE $! map typeToTypeNameExp (rType : tail argTypes)
@@ -186,8 +132,8 @@ trMethods ms = mapM trMeth ms >>= return . ListE
 
 typeToTypeNameExp :: Type -> Exp
 typeToTypeNameExp t =
-  let uv = SigE (VarE (mkName "undefined")) t
-  in AppE (VarE (mkName "mTypeOf")) uv
+  let uv = SigE (VarE 'undefined) t
+  in AppE (VarE 'mTypeOf) uv
 
 -- | Given the Type of a function, split it into the list of argument
 -- types and the return type.  The list of argument types is built up
@@ -257,7 +203,7 @@ mkFunType :: [Name] -> Type
 mkFunType = foldr addT iot
   where
     addT t acc = AppT (AppT ArrowT (ConT t)) acc
-    iot = AppT (ConT (mkName "IO")) (TupleT 0)
+    iot = AppT (ConT ''IO) (TupleT 0)
 
 -- | Builds a function to emit a signal.  It is of the form:
 --
@@ -275,6 +221,7 @@ buildSignal :: Name -> Int -> Name -> [Name] -> Q [Dec]
 buildSignal clsName signo sigName argTypes = do
   -- This is the internal signal name, tagged with its number for
   -- lookup later.
+  selfName <- newName "self"
   let sigInternalName = mkName (signalBaseName clsName ++ show signo)
   let sigTy = appT (appT arrowT (conT clsName)) (return (mkFunType argTypes))
 
@@ -283,7 +230,7 @@ buildSignal clsName signo sigName argTypes = do
       ixs :: [Int]
       ixs = [0..]
       argVars = take (length argTypes) $ map (\i -> mkName ("v" ++ show i)) ixs
-      cpatt = varP (mkName "self") : map varP argVars
+      cpatt = varP selfName : map varP argVars
 
   -- The body of the signal needs to eventually call hsqmlEmitSignal;
   -- however, we want to safely use a stack allocated array so we call
@@ -292,24 +239,24 @@ buildSignal clsName signo sigName argTypes = do
   marshalAndCallName <- newName "marshalAndCall"
   let szRef = varE szName
       marshalAndCall = varE marshalAndCallName
-      body0 = appE (varE (mkName "hsqmlAllocaBytes")) szRef
+      body0 = appE (varE 'hsqmlAllocaBytes) szRef
       body1 = appE body0 marshalAndCall
 
       -- | The size is the sum of all of the sizes of the arguments
       -- (we need this to compute the size of the buffer to allocate).
       --
       -- > nArgs * qmlStorableSizeOf (undefined :: QPointer)
-      sizeOfFunc = varE (mkName "hsqmlStorableSizeOf")
-      undefVal = varE (mkName "undefined")
-      ptrType = conT (mkName "QPointer")
+      sizeOfFunc = varE 'hsqmlStorableSizeOf
+      undefVal = varE 'undefined
+      ptrType = conT ''QPointer
       ptrSize = appE sizeOfFunc (sigE undefVal ptrType)
-      mulOp = varE (mkName "*")
+      mulOp = varE '(*)
       nSlots = litE (integerL (fromIntegral (length argTypes)))
       szBody = infixApp ptrSize mulOp nSlots
       szDef = valD (varP szName) (normalB szBody) []
 
       argsWithTypes = zip argVars argTypes
-      mshDef = mkMarshalAndCall signo marshalAndCallName (varE (mkName "self")) argsWithTypes
+      mshDef = mkMarshalAndCall signo marshalAndCallName (varE selfName) argsWithTypes
 
   internalSig <- sigD sigInternalName sigTy
   internalDef <- funD sigInternalName [clause cpatt (normalB body1) [szDef, mshDef]]
@@ -352,15 +299,15 @@ mkMarshalAndCall signo mname self vs = do
       defClause = clause [varP p0Name] (normalB body) []
   funD mname [defClause]
   where
-    mshlFunc = varE (mkName "marshal")
-    allocaFunc = varE (mkName "hsqmlAlloca")
-    pokeFunc = varE (mkName "hsqmlPokeElemOff")
-    castFunc = varE (mkName "hsqmlCastPtr")
+    mshlFunc = varE 'marshal
+    allocaFunc = varE 'hsqmlAlloca
+    pokeFunc = varE 'hsqmlPokeElemOff
+    castFunc = varE 'hsqmlCastPtr
 
     wrapInArgMarshal p0 (argno, (argName, argTyName)) innerExp = do
       xN <- newName ("x" ++ show argno)
       xNt <- newName ("x" ++ show argno ++ "t")
-      let ptrTy = appT (conT (mkName "Ptr")) (conT argTyName)
+      let ptrTy = appT (conT ''Ptr) (conT argTyName)
           argSig = sigD xNt ptrTy
           argBind = valD (varP xNt) (normalB (varE xN)) []
           letBind = letS [argSig, argBind]
@@ -379,9 +326,9 @@ mkMarshalAndCall signo mname self vs = do
       in noBindS $ appE (appE (appE pokeFunc (varE p0)) ix) castedPtr
     -- | > hsqmlEmitSignal self signo p0
     mkEmit p0Name =
-      let emit = varE (mkName "hsqmlEmitSignal")
+      let emit = varE 'hsqmlEmitSignal
           sigEx = litE (integerL (fromIntegral signo))
-          accFunc = appE (varE (mkName "_classSelfAccessor")) (varE (mkName "classDefinition"))
+          accFunc = appE (varE '_classSelfAccessor) (varE 'classDefinition)
           selfToPtr = appE accFunc self
       in noBindS $ appE (appE (appE emit selfToPtr) sigEx) (varE p0Name)
 
@@ -411,9 +358,9 @@ defMarshalFunc i = do
 
   return $! FunD name [cls]
   where
-    marRet = VarE (mkName "hsqmlMarshalRet")
-    peekOff = VarE (mkName "hsqmlPeekElemOff")
-    unmar = VarE (mkName "unmarshal")
+    marRet = VarE 'hsqmlMarshalRet
+    peekOff = VarE 'hsqmlPeekElemOff
+    unmar = VarE 'unmarshal
     mkPeek pv ix =
       let p = mkName ("p" ++ show ix)
       in BindS (VarP p) (AppE (AppE peekOff (VarE pv)) (LitE (IntegerL (fromIntegral i))))
@@ -481,3 +428,19 @@ hsqmlPeekElemOff = peekElemOff
 
 hsqmlStorableSizeOf :: (Storable a) => a -> Int
 hsqmlStorableSizeOf = sizeOf
+
+
+hsqmlMarshalMutator :: (Marshallable a, Marshallable b)
+                       => (a -> b -> IO ())
+                       -> UniformFunc
+hsqmlMarshalMutator f p0 pv = do
+  p1 <- peekElemOff pv 0
+  v0 <- unmarshal p0
+  v1 <- unmarshal p1
+  f v0 v1
+
+
+hsqmlMarshalRet :: (Marshallable tt) => Ptr () -> tt -> IO ()
+hsqmlMarshalRet ptr obj
+  | ptr == nullPtr = return ()
+  | otherwise      = marshal ptr obj

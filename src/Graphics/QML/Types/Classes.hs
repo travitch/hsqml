@@ -51,27 +51,10 @@ module Graphics.QML.Types.Classes (
   -- * TH Helpers
   defClass,
   registerTypes,
-
-  -- * Internal
-  Ptr,
-  Property(..),
-  Method(..),
-  Signal(..),
-  InternalClassDefinition(..),
-  hsqmlMarshalRet,
-  hsqmlMarshalMutator,
-  hsqmlAllocaBytes,
-  hsqmlAlloca,
-  hsqmlPeekElemOff,
-  hsqmlPokeElemOff,
-  hsqmlStorableSizeOf,
-  hsqmlCastPtr,
-  hsqmlEmitSignal
 ) where
 
 import Graphics.QML.Internal.Core
 import Graphics.QML.Internal.Classes
-import Graphics.QML.Internal.Primitive
 import Graphics.QML.Internal.TH
 
 import Data.Char
@@ -101,15 +84,6 @@ debug = flip trace
 --
 -- MetaObject
 --
-
--- | The class 'MetaObject' allows Haskell types to be accessed as objects
--- from within QML.
---
--- A 'Marshallable' instance is provided automatically for all instances of
--- this class, however, 'defClass' must be used to define an object's class
--- members before marshalling any values.
-class (Typeable tt) => MetaObject tt where
-  classDefinition :: InternalClassDefinition tt
 
 -- | This is the default Marshallable instance provided for all
 -- MetaObjects.  It should be sufficient for anything...
@@ -271,21 +245,6 @@ defPropertyRW name g s =
 -- Marshaling functions
 --
 
-
-hsqmlMarshalMutator :: (Marshallable a, Marshallable b)
-                       => (a -> b -> IO ())
-                       -> UniformFunc
-hsqmlMarshalMutator f p0 pv = do
-  p1 <- peekElemOff pv 0
-  v0 <- unmarshal p0
-  v1 <- unmarshal p1
-  f v0 v1
-
-
-hsqmlMarshalRet :: (Marshallable tt) => Ptr () -> tt -> IO ()
-hsqmlMarshalRet ptr obj
-  | ptr == nullPtr = return ()
-  | otherwise      = marshal ptr obj
 
 --
 -- MOC static data construction
