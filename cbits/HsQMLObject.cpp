@@ -145,6 +145,8 @@ extern "C" void hsqml_register_type(HsQMLPlacementFunc placementAllocator,
 
 extern "C" void hsqml_emit_signal(void* hndl, int signum, void **args)
 {
+  printf("Emitting signal %d (arg=%d)\n", signum, *((int*)args[1]));
+  args[0] = NULL;
   HsQMLObject* obj = (HsQMLObject*)hndl;
   QMetaObject::activate(obj, &HsQMLObject::staticMetaObject, signum, args);
 }

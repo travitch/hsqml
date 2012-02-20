@@ -261,14 +261,16 @@ buildSignal clsName signo sigName argTypes = do
 
       -- | The size is the sum of all of the sizes of the arguments
       -- (we need this to compute the size of the buffer to allocate).
+      -- Add an extra slot for a NULL pointer for the return address.
+      -- This is always unused in signals.
       --
-      -- > nArgs * qmlStorableSizeOf (undefined :: QPointer)
+      -- > (nArgs + 1) * qmlStorableSizeOf (undefined :: QPointer)
       sizeOfFunc = varE 'sizeOf
       undefVal = varE 'undefined
       ptrType = conT ''QPointer
       ptrSize = appE sizeOfFunc (sigE undefVal ptrType)
       mulOp = varE '(*)
-      nSlots = litE (integerL (fromIntegral (length argTypes)))
+      nSlots = litE (integerL (fromIntegral (1 + (length argTypes))))
       szBody = infixApp ptrSize mulOp nSlots
       szDef = valD (varP szName) (normalB szBody) []
 
@@ -310,7 +312,7 @@ mkMarshalAndCall :: Int -> Name -> ExpQ -> [(Name, Name)] -> DecQ
 mkMarshalAndCall signo mname self vs = do
   p0Name <- newName "vec"
   -- Start by generating the innermost statement (the call to
-  -- hsqmlEmitSignal) and then just wrap
+  -- hsqmlEmitSignal) and then just wrap.
   let ixs :: [Int]
       ixs = [0..]
       body = doE [foldr (wrapInArgMarshal p0Name) (mkEmit p0Name) (zip ixs vs)]
@@ -330,7 +332,7 @@ mkMarshalAndCall signo mname self vs = do
           argBind = valD (varP xNt) (normalB (varE xN)) []
           letBind = letS [argSig, argBind]
           mar = mkMshl xNt argName
-          poke = mkPoke p0 argno xNt
+          poke = mkPoke p0 (argno + 1) xNt
           doBlock = doE [ letBind, mar, poke, innerExp ]
       noBindS $ appE allocaFunc (lam1E (varP xN) doBlock)
 

@@ -57,7 +57,7 @@ import Graphics.QML.Internal.Core
 import Graphics.QML.Internal.Classes
 import Graphics.QML.Internal.TH
 
-import Data.Char
+import Data.Char ( chr )
 import Control.Monad
 import Control.Monad.Trans.State
 import Data.Bits
@@ -276,6 +276,22 @@ data MOCState =
 -- string (wherein all of the strings describing the class are
 -- embedded).
 data MOCOutput = MOCOutput [CUInt] [CChar]
+
+-- instance Show MOCOutput where
+--   show = showMOC
+
+-- showMOC :: MOCOutput -> String
+-- showMOC (MOCOutput arr str) = undefined
+--   where
+--     -- Split the data string on nulls and record the integer index
+--     -- where each string starts.
+--     strMap = snd $ foldr extractStrings ("", Map.empty) (zip [0..] str)
+
+-- extractStrings cchar (s, m) =
+--   case cchar == 0 of
+--     True -> undefined
+--     False -> (chr (fromIntegral cchar) : s, m)
+
 
 newMOCState :: MOCState
 newMOCState = MOCState [] 0 Nothing Nothing [] 0 Map.empty
