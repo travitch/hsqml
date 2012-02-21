@@ -51,9 +51,10 @@ newClassHandle p =
    `String',
    fromIntegral `Int',
    fromIntegral `Int',
-   `String'} -> `()' #}
+   `String',
+   id `Ptr HsQMLClassHandle'} -> `()' #}
 
-{#fun unsafe hsqml_emit_signal as ^
+{#fun hsqml_emit_signal as ^
   {id `Ptr ()',
    fromIntegral `Int',
    id `Ptr (Ptr ())'} -> `()' #}

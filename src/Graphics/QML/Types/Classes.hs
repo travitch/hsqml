@@ -61,6 +61,7 @@ import Data.Char ( chr )
 import Control.Monad
 import Control.Monad.Trans.State
 import Data.Bits
+import Data.List ( foldl' )
 import Data.Map ( Map )
 import qualified Data.Map as Map
 import Data.Maybe
@@ -77,6 +78,7 @@ import Language.Haskell.TH
 import System.FilePath ( takeExtension )
 #endif
 import System.IO.Unsafe
+import Text.Printf
 
 import Debug.Trace
 debug = flip trace
@@ -143,7 +145,8 @@ metaClass = unsafePerformIO $ do
 
       -- Now register this class with the equivalent of
       -- qmlRegisterType so that instances can be created from QML.
-      hsqmlRegisterType ctorPtr uri major minor name
+      withHsQMLClassHandle (classData mClass) $ \h -> do
+        hsqmlRegisterType ctorPtr uri major minor name h
 
       return mClass
 
@@ -161,13 +164,13 @@ createClass name (InternalClassDef _ _ properties methods signals _ _) = do
   -- This is the moc step; metaData is equivalent to the
   -- qt_meta_data_<TYPE> array that moc produces.  metaStrData is
   -- equivalent to qt_meta_stringdata_<TYPE>.
-  let (MOCOutput metaData metaStrData) =
+  let moc@(MOCOutput metaData metaStrData) =
         compileClass name signals methods properties
 
   -- Convert all of the class description stuff into C-compatible
   -- types (arrays of Storable types).
-  metaDataPtr <- newArray metaData `debug`
-                 show (map (map (chr . fromIntegral)) (splitOn (==0) metaStrData))
+  metaDataPtr <- newArray metaData `debug` show moc
+--                 show (map (map (chr . fromIntegral)) (splitOn (==0) metaStrData))
   metaStrDataPtr <- newArray metaStrData
   methodsPtr <- mapM (marshalFunc . methodFunc) methods >>= newArray
   pReads <- mapM (marshalFunc . propertyReadFunc) properties
@@ -277,20 +280,46 @@ data MOCState =
 -- embedded).
 data MOCOutput = MOCOutput [CUInt] [CChar]
 
--- instance Show MOCOutput where
---   show = showMOC
+instance Show MOCOutput where
+  show = showMOC
 
--- showMOC :: MOCOutput -> String
--- showMOC (MOCOutput arr str) = undefined
---   where
---     -- Split the data string on nulls and record the integer index
---     -- where each string starts.
---     strMap = snd $ foldr extractStrings ("", Map.empty) (zip [0..] str)
+showMOC :: MOCOutput -> String
+showMOC (MOCOutput arr str) =
+  showMethods (map fromIntegral arr) strMap 4 5 `debug` show strMap
+  where
+    ixs :: [Int]
+    ixs = [0..]
+    -- Split the data string on nulls and record the integer index
+    -- where each string starts.
+    (_, _, strMap) = foldl' extractStrings (0, "", Map.empty) (zip ixs str)
 
--- extractStrings cchar (s, m) =
---   case cchar == 0 of
---     True -> undefined
---     False -> (chr (fromIntegral cchar) : s, m)
+showMethods arr m ixN ixStart =
+  concat $ showMethod m ints `debug` show ints
+  where
+    n = fromIntegral $ arr !! ixN
+    s = fromIntegral $ arr !! ixStart
+    ints = take (5 * n) $ drop s arr
+
+showMethod :: Map Int String -> [Int] -> [String]
+showMethod _ [] = []
+showMethod m (sigN : paramsN : typeN : _ : flags : rest) =
+  s : showMethod m rest
+  where
+    s = printf "%s(%s) : %s : %d\n" name params ty flags
+    name = m Map.! fromIntegral sigN
+    params = m Map.! fromIntegral paramsN
+    ty = m Map.! fromIntegral typeN
+
+
+
+extractStrings :: (Integral a)
+                  => (Int, String, Map Int String)
+                  -> (Int, a)
+                  -> (Int, String, Map Int String)
+extractStrings (start, s, m) (ix, cchar) =
+  case cchar == 0 of
+    True -> (ix+1, "", Map.insert start (reverse s) m)
+    False -> (start, chr (fromIntegral cchar) : s, m)
 
 
 newMOCState :: MOCState
@@ -327,7 +356,7 @@ writeString str = do
              , mStrDataLen = msdLen'
              , mStrDataMap = msdMap'
              }
-      writeInt idx
+      writeInt idx `debug` printf "String %s @ %d" str ((fromIntegral idx) :: Int)
 
 -- | Append a 'Method' into the methods index in the mData table.
 -- Each entry has 5 components: signature, parameters, type, tag,

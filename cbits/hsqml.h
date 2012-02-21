@@ -64,7 +64,7 @@ extern void hsqml_emit_signal(void*, int, void**);
 
 /* Types */
 extern void hsqml_register_type(HsQMLPlacementFunc, const char*,
-    int, int, const char*);
+    int, int, const char*, HsQMLClassHandle*);
 extern void hsqml_allocate_in_place(void*, void*, HsQMLClassHandle*);
 
 #ifdef __cplusplus

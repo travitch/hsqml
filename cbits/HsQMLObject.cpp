@@ -47,6 +47,7 @@ int HsQMLObject::qt_metacall(QMetaObject::Call c, int id, void** a)
     return id;
   }
   if (QMetaObject::InvokeMetaMethod == c) {
+    fprintf(stderr, "call id = %d\n", id);
     // We handle methods a bit differently than standard Qt.  When
     // dispatching a method, subtract out the number of signals from
     // the id we are passed.  Qt stores both signals and methods in
@@ -106,8 +107,10 @@ extern "C" void hsqml_allocate_in_place(void *memory, void *priv, HsQMLClassHand
 }
 
 extern "C" void hsqml_register_type(HsQMLPlacementFunc placementAllocator,
-    const char *uri, int versionMajor, int versionMinor, const char *qmlName)
+    const char *uri, int versionMajor, int versionMinor, const char *qmlName,
+    HsQMLClassHandle *khdl)
 {
+  HsQMLClass *klass = (HsQMLClass*)khdl;
   QDeclarativePrivate::RegisterType rt;
   rt.version = 0;
 
@@ -134,7 +137,7 @@ extern "C" void hsqml_register_type(HsQMLPlacementFunc placementAllocator,
   rt.versionMajor = versionMajor;
   rt.versionMinor = versionMinor;
   rt.elementName = qmlName;
-  rt.metaObject = &HsQMLObject::staticMetaObject;
+  rt.metaObject = &klass->mMetaObject; // HsQMLObject::staticMetaObject;
 
   rt.extensionObjectCreate = 0;
   rt.extensionMetaObject = 0;
@@ -148,5 +151,7 @@ extern "C" void hsqml_emit_signal(void* hndl, int signum, void **args)
   printf("Emitting signal %d (arg=%d)\n", signum, *((int*)args[1]));
   args[0] = NULL;
   HsQMLObject* obj = (HsQMLObject*)hndl;
-  QMetaObject::activate(obj, &HsQMLObject::staticMetaObject, signum, args);
+//  asm("int $0x3");
+  QMetaObject::activate(obj, /*&HsQMLObject::staticMetaObject*/
+      obj->metaObject(), signum, args);
 }
