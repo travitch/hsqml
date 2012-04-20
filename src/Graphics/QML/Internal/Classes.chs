@@ -34,19 +34,19 @@ newClassHandle p =
       fp <- newForeignPtr hsqmlFinaliseClassHandlePtr p
       return $ Just $ HsQMLClassHandle fp
 
-{#fun unsafe hsqml_create_class as ^
+{#fun hsqml_create_class as ^
   {id `Ptr CUInt',
    id `Ptr CChar',
    id `Ptr (FunPtr UniformFunc)',
    id `Ptr (FunPtr UniformFunc)'} ->
   `Maybe HsQMLClassHandle' newClassHandle* #}
 
-{#fun unsafe hsqml_allocate_in_place as ^
+{#fun hsqml_allocate_in_place as ^
   {id `Ptr ()',
    id `Ptr ()',
    id `Ptr HsQMLClassHandle'} -> `()' #}
 
-{#fun unsafe hsqml_register_type as ^
+{#fun hsqml_register_type as ^
   {id `FunPtr PlacementFunc',
    `String',
    fromIntegral `Int',
@@ -68,7 +68,7 @@ objToPtr obj f = do
   return res
 
 withHsQMLClassHandle :: HsQMLClassHandle -> (Ptr HsQMLClassHandle -> IO b) -> IO b
-{#fun unsafe hsqml_create_object as ^
+{#fun hsqml_create_object as ^
   {objToPtr* `a',
    withHsQMLClassHandle* `HsQMLClassHandle'} ->
   `HsQMLObjectHandle' id #}
@@ -77,7 +77,7 @@ ptrToObj :: Ptr () -> IO a
 ptrToObj =
   deRefStablePtr . castPtrToStablePtr
 
-{#fun unsafe hsqml_get_haskell as ^
+{#fun hsqml_get_haskell as ^
   {id `HsQMLObjectHandle'} ->
   `a' ptrToObj* #}
 
