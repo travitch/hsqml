@@ -58,14 +58,15 @@ defClass cd = do
   --
   -- The Marhsal instance for the type will handle actually using this
   -- definition to create and register the type inside of Qt.
-  tdef <- translateDef cd
-  let clsDef = ValD (VarP 'classDefinition) (NormalB tdef) []
-      itype = AppT (ConT ''MetaObject) (ConT clsName)
-      instanceDec = InstanceD [] itype [clsDef]
+  let tdef = translateDef cd
+      clsDef = valD (varP 'classDefinition) (normalB tdef) []
+      itype = appT (conT ''MetaObject) (conT clsName)
+
+  instanceDec <- instanceD (cxt []) itype [clsDef]
 
   return $! [instanceDec]
 
-translateDef :: ClassDefinition -> Q Exp
+translateDef :: ClassDefinition -> ExpQ
 translateDef pcd = do
   definedSignals <- signalsForType (className pcd)
   let (majV, minV) = classVersion pcd
@@ -89,11 +90,11 @@ translateDef pcd = do
 
   recConE cdName flds
   where
-    mkIntLit :: Int -> Q Exp
+    mkIntLit :: Int -> ExpQ
     mkIntLit = litE . integerL . fromIntegral
 
-trProperties :: [ProtoClassProperty] -> Q Exp
-trProperties ps = mapM trProp ps >>= (return . ListE)
+trProperties :: [ProtoClassProperty] -> ExpQ
+trProperties ps = listE (map trProp ps)
   where
     trProp (PProperty n g s fs) = do
       -- Look at the type of the getter (since it must exist) to infer
@@ -102,22 +103,23 @@ trProperties ps = mapM trProp ps >>= (return . ListE)
       let (_, propTypeIO) = splitTypes gt
           propType = removeIOWrapper propTypeIO
           flag = foldr (.|.) 0 fs
-          c1 = AppE (ConE 'Property) (LitE (StringL n))
-          c2 = AppE c1 (typeToTypeNameExp propType)
-      c3 <- (mkUniformFunc g) >>= (return . AppE c2)
-      c4 <- (maybeMkUniformFunc s) >>= (return . AppE c3)
-      let flagEx = AppE (VarE 'fromIntegral) (LitE (IntegerL (fromIntegral flag)))
-          c5 = AppE c4 flagEx
-      return c5
+          c1 = appE (conE 'Property) (litE (stringL n))
+          c2 = appE c1 (typeToTypeNameExp propType)
+          c3 = appE c2 (mkUniformFunc g)
+          c4 = appE c3 (maybeMkUniformFunc s)
+          flagEx = appE (varE 'fromIntegral) (litE (integerL (fromIntegral flag)))
+      appE c4 flagEx
+
     mkUniformFunc n = do
       let mfuncName = mkName "marshalFunc0"
-      let mfunc = VarE mfuncName
-      dec <- defMarshalFunc 0
-      return $! LetE [dec] (AppE mfunc (VarE n))
-    maybeMkUniformFunc Nothing = return $! ConE 'Nothing
+          mfunc = varE mfuncName
+          dec = defMarshalFunc 0
+      letE [dec] (appE mfunc (varE n))
+
+    maybeMkUniformFunc Nothing = conE 'Nothing
     maybeMkUniformFunc (Just n) = do
-      let mfunc = VarE 'hsqmlMarshalMutator
-      return $! AppE (ConE 'Just) (AppE mfunc (VarE n))
+      let mfunc = varE 'hsqmlMarshalMutator
+      appE (conE 'Just) (appE mfunc (varE n))
 
 -- | Translate a ProtoMethod to an Exp representing its equivalent
 -- Method.
@@ -126,30 +128,31 @@ trProperties ps = mapM trProp ps >>= (return . ListE)
 -- > Method { methodName = n, methodFunc = defMethodN mref
 -- >        , methodTypes = [ mTypeOf (undefined :: t1), ..] }
 trMethods :: [ProtoClassMethod] -> Q Exp
-trMethods ms = mapM trMeth ms >>= return . ListE
+trMethods ms = listE (map trMeth ms)
   where
     trMeth (PMethod qname mref) = do
       -- Figure out the type of the function that the user gave us.
       VarI _ t _ _ <- reify mref
       let (argTypes, rTypeIO) = splitTypes t
           rType = removeIOWrapper rTypeIO
-      let c1 = AppE (ConE 'Method) (LitE (StringL qname))
+          c1 = appE (conE 'Method) (litE (stringL qname))
           -- Use tail on argTypes so that we can drop the this pointer
           -- (which isn't counted in qt method descriptions).
-          mtypes = ListE $! map typeToTypeNameExp (rType : tail argTypes)
-          c2 = AppE c1 mtypes
-      mfunc <- mkUniformFunc mref (tail argTypes)
-      return $! AppE c2 mfunc
+          mtypes = listE $! map typeToTypeNameExp (rType : tail argTypes)
+          c2 = appE c1 mtypes
+          mfunc = mkUniformFunc mref (tail argTypes)
+      appE c2 mfunc
+
     mkUniformFunc fname ts = do
       let mfuncName = mkName ("marshalFunc" ++ show (length ts))
-      let mfunc = VarE mfuncName
-      dec <- defMarshalFunc (length ts)
-      return $! LetE [dec] (AppE mfunc (VarE fname))
+          mfunc = varE mfuncName
+          dec = defMarshalFunc (length ts)
+      letE [dec] (appE mfunc (varE fname))
 
-typeToTypeNameExp :: Type -> Exp
-typeToTypeNameExp t =
-  let uv = SigE (VarE 'undefined) t
-  in AppE (VarE 'mTypeOf) uv
+typeToTypeNameExp :: Type -> ExpQ
+typeToTypeNameExp t = appE (varE 'mTypeOf) uv
+  where
+    uv = sigE (varE 'undefined) (return t)
 
 -- | Given the Type of a function, split it into the list of argument
 -- types and the return type.  The list of argument types is built up
@@ -175,7 +178,7 @@ removeIOWrapper t = error ("Illegal type (not wrapped in IO): " ++ pprint t)
 
 -- | Convert a ProtoSignal to an Exp representing a Signal to be
 -- spliced into the ClassDefinition
-trSigs :: [Info] -> Q Exp
+trSigs :: [Info] -> ExpQ
 trSigs = listE . map trSig
   where
     -- | Convert the Info object from a Signal into a Signal
@@ -188,7 +191,7 @@ trSigs = listE . map trSig
       appE c1 tns
     trSig i = error ("Expected variable info: " ++ show i)
     -- Convert a type to a runtime type in terms of mTypeOf
-    trType :: Type -> Q Exp
+    trType :: Type -> ExpQ
     trType t =
       let uv = sigE (varE 'undefined) (return t)
       in appE (varE 'mTypeOf) uv
@@ -215,12 +218,11 @@ defSignal clsName sigName argTypes = do
   let signo = length currentSignals
   buildSignal clsName signo (mkName sigName) argTypes
 
-
-mkFunType :: [Name] -> Type
+mkFunType :: [Name] -> TypeQ
 mkFunType = foldr addT iot
   where
-    addT t acc = AppT (AppT ArrowT (ConT t)) acc
-    iot = AppT (ConT ''IO) (TupleT 0)
+    addT t acc = appT (appT arrowT (conT t)) acc
+    iot = appT (conT ''IO) (tupleT 0)
 
 -- | Builds a function to emit a signal.  It is of the form:
 --
@@ -240,7 +242,7 @@ buildSignal clsName signo sigName argTypes = do
   -- lookup later.
   selfName <- newName "self"
   let sigInternalName = mkName (signalBaseName clsName ++ show signo)
-  let sigTy = appT (appT arrowT (conT clsName)) (return (mkFunType argTypes))
+  let sigTy = appT (appT arrowT (conT clsName)) (mkFunType argTypes)
 
       -- Make a list of variables self v0..vn where self will be the
       -- this ptr
@@ -354,7 +356,7 @@ mkMarshalAndCall signo mname self vs = do
 
 -- | Builds a marshaller from Haskell function with the given arity to
 -- a UniformFunc (which can be called by Qt).
-defMarshalFunc :: Int -> Q Dec
+defMarshalFunc :: Int -> DecQ
 defMarshalFunc i = do
   r <- newName "r"
   pv <- newName "pv"
@@ -362,32 +364,32 @@ defMarshalFunc i = do
   p0 <- newName "p0"
   pr <- newName "pr"
   v0 <- newName "v0"
-  let vNs = map (\ix -> VarE (mkName ("v" ++ show ix))) [1..i]
-  let name = mkName ("marshalFunc" ++ show i)
-      fpatt = [VarP f, VarP p0, VarP pv]
-      peekPr = BindS (VarP pr) (AppE (AppE peekOff (VarE pv)) (LitE (IntegerL 0)))
-      unmarThis = BindS (VarP v0) (AppE unmar (VarE p0))
+  let vNs = map (\ix -> varE (mkName ("v" ++ show ix))) [1..i]
+      name = mkName ("marshalFunc" ++ show i)
+      fpatt = [varP f, varP p0, varP pv]
+      peekPr = bindS (varP pr) (appE (appE peekOff (varE pv)) (litE (integerL 0)))
+      unmarThis = bindS (varP v0) (appE unmar (varE p0))
       peeks = map (mkPeek pv) [1..i]
       unmars = map mkUnm [1..i]
       -- The call with all of the unmarshaled params
-      call = BindS (VarP r) $ foldl' AppE (AppE (VarE f) (VarE v0)) vNs
-      ret = NoBindS $ (AppE (AppE marRet (VarE pr)) (VarE r))
+      call = bindS (varP r) $ foldl' appE (appE (varE f) (varE v0)) vNs
+      ret = noBindS $ (appE (appE marRet (varE pr)) (varE r))
 
-      body = DoE $! concat [[peekPr, unmarThis], peeks, unmars, [call, ret]]
-      cls = Clause fpatt (NormalB body) []
+      body = doE $! concat [[peekPr, unmarThis], peeks, unmars, [call, ret]]
+      cls = clause fpatt (normalB body) []
 
-  return $! FunD name [cls]
+  funD name [cls]
   where
-    marRet = VarE 'hsqmlMarshalRet
-    peekOff = VarE 'peekElemOff
-    unmar = VarE 'unmarshal
+    marRet = varE 'hsqmlMarshalRet
+    peekOff = varE 'peekElemOff
+    unmar = varE 'unmarshal
     mkPeek pv ix =
       let p = mkName ("p" ++ show ix)
-      in BindS (VarP p) (AppE (AppE peekOff (VarE pv)) (LitE (IntegerL (fromIntegral i))))
+      in bindS (varP p) (appE (appE peekOff (varE pv)) (litE (integerL (fromIntegral i))))
     mkUnm ix =
       let v = mkName ("v" ++ show ix)
           p = mkName ("p" ++ show ix)
-      in BindS (VarP v) (AppE unmar (VarE p))
+      in bindS (varP v) (appE unmar (varE p))
 
 tryReify :: Name -> Q (Maybe Info)
 tryReify name = reify name >>= (return . Just)
