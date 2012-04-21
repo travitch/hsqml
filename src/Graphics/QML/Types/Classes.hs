@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables, FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances, OverlappingInstances #-}
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE CPP, TemplateHaskell #-}
 -- | Facilities for defining new object types which can be marshalled between
 -- Haskell and QML.
 --
@@ -534,9 +534,9 @@ makeForceVal :: Dec -> Exp -> Exp
 makeForceVal (InstanceD _ (AppT _ t ) _) acc =
   AppE f1 acc
   where
-    uval = SigE (VarE (mkName "undefined")) t
-    app = AppE (VarE (mkName "mTypeOf")) uval
-    f1 = AppE (VarE (mkName "seq")) app
+    uval = SigE (VarE 'undefined) t
+    app = AppE (VarE 'mTypeOf) uval
+    f1 = AppE (VarE 'seq) app
 makeForceVal d _ = error ("Unepxected decl: " ++ show d)
 #else
 type TypeKey = Int
@@ -554,8 +554,8 @@ makeForceVal :: ClassInstance -> Exp -> Exp
 makeForceVal ClassInstance { ci_tys = [t] } acc =
   AppE f1 acc
   where
-    uval = SigE (VarE (mkName "undefined")) t
-    app = AppE (VarE (mkName "mTypeOf")) uval
-    f1 = AppE (VarE (mkName "seq")) app
+    uval = SigE (VarE 'undefined) t
+    app = AppE (VarE 'mTypeOf) uval
+    f1 = AppE (VarE 'seq) app
 makeForceVal i _ = error ("Unexpected instance: " ++ show i)
 #endif
