@@ -43,11 +43,10 @@ import Graphics.QML.Internal.Classes ( hsqmlEmitSignal )
 -- your defined types from within QML.
 --
 -- Remember to enable the TemplateHaskell language extension.
-registerTypes :: Q Exp
+registerTypes :: ExpQ
 registerTypes = do
-  let iname = mkName "MetaObject"
-  ClassI _ instances <- reify iname
-  let rexp = AppE (VarE (mkName "return")) (TupE [])
+  ClassI _ instances <- reify ''MetaObject
+  let rexp = AppE (VarE 'return) (TupE [])
   return $! foldr makeForceVal rexp instances
 
 
