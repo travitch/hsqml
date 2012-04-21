@@ -31,6 +31,8 @@ import Language.Haskell.TH ( Name )
 -- | A wrapper around names of Types.
 newtype TypeName = TypeName { typeName :: String }
 
+-- | Created by 'defPropertyRO' and 'defPropertyRW'; specifies the
+-- properties available in a class.
 data ProtoClassProperty =
   PProperty { pPropertyName :: String
             , pPropertyReadFunc :: Name
@@ -38,11 +40,14 @@ data ProtoClassProperty =
             , pPropertyFlags :: [CUInt]
             }
 
+-- | Created by 'defMethod'; specifies the methods available in a
+-- class.
 data ProtoClassMethod =
   PMethod { pMethodName  :: String -- ^ The name of the 'Method'
           , pMethodFunc  :: Name
           }
 
+-- | The user-visible description of a Signal; see 'defSignal'
 data ProtoSignal =
   PSignal { pSignalName :: String
           , pSignalArgTypes :: [Name]
@@ -73,6 +78,9 @@ type QPointer = Ptr ()
 class (Typeable tt) => MetaObject tt where
   classDefinition :: InternalClassDefinition tt
 
+-- | The internal representation of class Properties.  These are
+-- constructed in TH code based on the 'classProperties' provided by
+-- the user.
 data Property =
   Property { propertyName :: String
            , propertyType :: TypeName
@@ -81,6 +89,9 @@ data Property =
            , propertyFlags :: CUInt
            }
 
+-- | The internal representation of class Methods.  These are
+-- constructed in TH code based on the 'classMethods' provided by the
+-- user.
 data Method =
   Method { methodName  :: String -- ^ The name of the 'Method'
          , methodTypes :: [TypeName] -- ^ Gets the 'TypeName's which
@@ -96,16 +107,36 @@ data Signal =
          , signalArgTypes :: [TypeName]
          }
 
+-- | The user-visible class definition (fed to TH code to create an
+-- 'InternalClassDefinition')
 data ClassDefinition = ClassDef {
-  className :: Name,
-  classVersion :: (Int, Int),
-  classURI :: String,
-  classProperties :: [ProtoClassProperty],
-  classMethods :: [ProtoClassMethod],
-  classConstructor :: Name,
-  classSelfAccessor :: Name
+  className :: Name, -- ^ Name of the class
+  classVersion :: (Int, Int), -- ^ Class version (major, minor)
+  classURI :: String, -- ^ URI of the class provider
+  classProperties :: [ProtoClassProperty], -- ^ Property descriptors (see 'defPropertyRO' and 'defPropertyRW')
+  classMethods :: [ProtoClassMethod], -- ^ Method descriptors (see 'defMethod')
+  classConstructor :: Name, -- ^ The object constructor
+  classSelfAccessor :: Name -- ^ The function to access the underlying C++ object
   }
 
+-- | This is the real definition of a QObject that is generated via TH
+-- code (specifically 'defClass').
+--
+-- The only thing that is not straightforward is the use of QPointer.
+-- Each Haskell QML object has a C++ wrapper object that is used by
+-- QML: an HsQMLObject.  This would not need to be user visible at all
+-- except for the way signals are emitted from Haskell code.
+--
+-- To emit a signal, the pointer to the underlying C++ object is
+-- required.  This means that the user must store it in their Haskell
+-- object for later retrieval (i.e., whenever a signal is emitted).
+--
+-- The accessor for this is '_classSelfAccessor', which users fill in
+-- using the 'classSelfAccessor' field of 'ClassDefinition'.  They get
+-- this pointer via '_classConstructor', which is called whenever a
+-- new Haskell QML object is created.  This gives them a chance to
+-- store the pointer in their Haskell object.  The classConstructor
+-- should return the fully-constructed Haskell QML object.
 data InternalClassDefinition tt = InternalClassDef {
   _classVersion :: (Int, Int),
   _classURI :: String,

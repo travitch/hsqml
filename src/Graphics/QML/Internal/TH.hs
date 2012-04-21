@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, CPP #-}
 -- | This module contains the TemplateHaskell helper to define
 -- QObjects, along with supporting data types and helpers used in the
 -- TH expansion.
@@ -9,7 +9,8 @@ module Graphics.QML.Internal.TH (
 
   -- * Functions
   defClass,
-  defSignal
+  defSignal,
+  registerTypes
   ) where
 
 import Data.Bits
@@ -26,6 +27,29 @@ import System.IO.Unsafe ( unsafePerformIO )
 
 import Graphics.QML.Internal.Core
 import Graphics.QML.Internal.Classes ( hsqmlEmitSignal )
+
+-- | This function is meant to be used at the beginning of main as:
+--
+-- > main :: IO ()
+-- > main = do
+-- >   $registerTypes
+-- >   return ()
+--
+-- It registers all of the types implementing the 'MetaObject'
+-- interface with the QML runtime system (analagous to qmlRegisterType
+-- in C++).
+--
+-- If you do not call this function, you will not be able to reference
+-- your defined types from within QML.
+--
+-- Remember to enable the TemplateHaskell language extension.
+registerTypes :: Q Exp
+registerTypes = do
+  let iname = mkName "MetaObject"
+  ClassI _ instances <- reify iname
+  let rexp = AppE (VarE (mkName "return")) (TupE [])
+  return $! foldr makeForceVal rexp instances
+
 
 {-# NOINLINE signalNameMap #-}
 signalNameMap :: IORef (Map String Name)
@@ -44,14 +68,40 @@ signalNameLookup n = do
 
 -- | This function takes a declarative class description (via the
 -- 'ClassDefinition' type) and converts it into an instance
--- declaration and definitions of all of the requested signals.
+-- declaration, which will be registered into the class database upon
+-- first use.
+--
+-- The 'ClassDefinition' is expanded into an instance declaration for
+-- a MetaObject:
+--
+-- > data HSType = HSType { }
+-- >
+-- > defClass ClassDef {
+-- >   className = ''HSType,
+-- >   classVersion = (1, 0),
+-- >   classURI = "nochair.net",
+-- >   classMethods = [ defMethod "foo" 'hstypeFoo ],
+-- >   classProperties = [ defPropertyRO "bar" 'hstypeReadBar ],
+-- >   classConstructor = 'makeHSType,
+-- >   classSelfAccessor = 'hstypePtr
+-- > }
+--
+-- Becomes:
+--
+-- > instance MetaObject HSType where
+-- >   classDefinition =
+-- >     InternalClassDef {
+-- >       _classURI = "nochair.net",
+-- >       _classVersion = (1, 0),
+-- >       ...
 defClass :: ClassDefinition -> Q [Dec]
 defClass cd = do
   let clsName = className cd
   -- This is the instance declaration of the form:
   --
   -- > instance MetaObject <Type> where
-  -- >   classDefinition = cd
+  -- >   classDefinition = InternalClassDef { _classURI = "..."
+  --
   --
   -- Since we want to use the argument in the generated code, we have
   -- to lift it into an Exp in the Q monad.
@@ -444,3 +494,27 @@ hsqmlMarshalRet :: (Marshallable tt) => Ptr () -> tt -> IO ()
 hsqmlMarshalRet ptr obj
   | ptr == nullPtr = return ()
   | otherwise      = marshal ptr obj
+
+
+-- Helpers
+#if __GLASGOW_HASKELL__ >= 704
+
+makeForceVal :: Dec -> Exp -> Exp
+makeForceVal (InstanceD _ (AppT _ t ) _) acc =
+  AppE f1 acc
+  where
+    uval = SigE (VarE 'undefined) t
+    app = AppE (VarE 'mTypeOf) uval
+    f1 = AppE (VarE 'seq) app
+makeForceVal d _ = error ("Unepxected decl: " ++ show d)
+
+#else
+makeForceVal :: ClassInstance -> Exp -> Exp
+makeForceVal ClassInstance { ci_tys = [t] } acc =
+  AppE f1 acc
+  where
+    uval = SigE (VarE 'undefined) t
+    app = AppE (VarE 'mTypeOf) uval
+    f1 = AppE (VarE 'seq) app
+makeForceVal i _ = error ("Unexpected instance: " ++ show i)
+#endif

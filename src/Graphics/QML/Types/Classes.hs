@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables, FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances, OverlappingInstances #-}
-{-# LANGUAGE CPP, TemplateHaskell #-}
+{-# LANGUAGE CPP #-}
 -- | Facilities for defining new object types which can be marshalled between
 -- Haskell and QML.
 --
@@ -37,6 +37,10 @@ module Graphics.QML.Types.Classes (
   ClassDefinition(..),
   QPointer,
 
+  -- * Primary Helpers
+  defClass,
+  registerTypes,
+
   -- * Context Objects
   allocateContextObject,
 
@@ -49,11 +53,6 @@ module Graphics.QML.Types.Classes (
   -- * Properties
   defPropertyRO,
   defPropertyRW,
-
-  -- * TH Helpers
-  defClass,
-  registerTypes,
-
 ) where
 
 import Graphics.QML.Internal.Core
@@ -76,7 +75,7 @@ import Foreign.Ptr
 import Foreign.StablePtr
 import Foreign.Storable
 import Foreign.Marshal.Array
-import Language.Haskell.TH
+import Language.Haskell.TH ( Name )
 #if __GLASGOW_HASKELL__ < 704
 import System.FilePath ( takeExtension )
 #endif
@@ -173,7 +172,6 @@ createClass name (InternalClassDef _ _ properties methods signals _ _) = do
   -- Convert all of the class description stuff into C-compatible
   -- types (arrays of Storable types).
   metaDataPtr <- newArray metaData `debug` show moc
---                 show (map (map (chr . fromIntegral)) (splitOn (==0) metaStrData))
   metaStrDataPtr <- newArray metaStrData
   methodsPtr <- mapM (marshalFunc . methodFunc) methods >>= newArray
   pReads <- mapM (marshalFunc . propertyReadFunc) properties
@@ -203,13 +201,6 @@ interleave (x:xs) ys = x : ys `interleave` xs
 
 defMethod :: String -> Name -> ProtoClassMethod
 defMethod = PMethod
-
---
--- Signal
---
-
--- defSignal :: String -> [Name] -> ProtoSignal
--- defSignal = PSignal
 
 --
 -- Property
@@ -501,27 +492,6 @@ allocateContextObject partialObject = do
 
 -- TH Helpers
 
--- | This function is meant to be used at the beginning of main as:
---
--- > main :: IO ()
--- > main = do
--- >   $registerTypes
--- >   return ()
---
--- It registers all of the types implementing the 'MetaObject'
--- interface with the QML runtime system (analagous to qmlRegisterType
--- in C++).
---
--- If you do not call this function, you will not be able to reference
--- your defined types from within QML.
---
--- Remember to enable the TemplateHaskell language extension.
-registerTypes :: Q Exp
-registerTypes = do
-  let iname = mkName "MetaObject"
-  ClassI _ instances <- reify iname
-  let rexp = AppE (VarE (mkName "return")) (TupE [])
-  return $! foldr makeForceVal rexp instances
 
 #if __GLASGOW_HASKELL__ >= 704
 type TypeKey = TypeRep
@@ -530,14 +500,6 @@ examineTypeInfo :: TypeRep -> IO (String, TypeKey)
 examineTypeInfo typ = do
   return (tyConName (typeRepTyCon typ), typ)
 
-makeForceVal :: Dec -> Exp -> Exp
-makeForceVal (InstanceD _ (AppT _ t ) _) acc =
-  AppE f1 acc
-  where
-    uval = SigE (VarE 'undefined) t
-    app = AppE (VarE 'mTypeOf) uval
-    f1 = AppE (VarE 'seq) app
-makeForceVal d _ = error ("Unepxected decl: " ++ show d)
 #else
 type TypeKey = Int
 
@@ -549,13 +511,4 @@ examineTypeInfo typ = do
   -- drop it using tail.
   let name = tail $ takeExtension $ tyConString $ typeRepTyCon typ
   return (name, key)
-
-makeForceVal :: ClassInstance -> Exp -> Exp
-makeForceVal ClassInstance { ci_tys = [t] } acc =
-  AppE f1 acc
-  where
-    uval = SigE (VarE 'undefined) t
-    app = AppE (VarE 'mTypeOf) uval
-    f1 = AppE (VarE 'seq) app
-makeForceVal i _ = error ("Unexpected instance: " ++ show i)
 #endif
