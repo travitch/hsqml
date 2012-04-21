@@ -81,6 +81,13 @@ ptrToObj =
   {id `HsQMLObjectHandle'} ->
   `a' ptrToObj* #}
 
+{#fun hsqml_set_haskell as ^
+  {id `Ptr ()',
+   id `Ptr ()'} -> `()' #}
+
+{#fun hsqml_allocate_context_object as ^
+  {id `Ptr HsQMLClassHandle'} -> `Ptr ()' id #}
+
 ofDynamicMetaObject :: CUInt
 ofDynamicMetaObject = 0x01
 

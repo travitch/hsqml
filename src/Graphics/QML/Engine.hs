@@ -71,11 +71,6 @@ createEngine config = do
     objPtr
     (uriToString id (initialURL config) "")
 
-allocateContextObject :: forall a . (MetaObject a) => (QPointer -> a) -> IO a
-allocateContextObject partialObject = do
-  mem <- mallocBytes (mSizeOf (undefined :: a))
-  let obj = partialObject mem
-  return obj
 
 -- | Enters the Qt event loop and runs until all engines have terminated.
 runEngines :: IO ()

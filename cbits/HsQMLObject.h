@@ -14,6 +14,7 @@ public:
   virtual void* qt_metacast(const char*);
   virtual int qt_metacall(QMetaObject::Call, int, void**);
   void* haskell() const;
+  void haskell(void*);
 
 private:
   void* mHaskell;

@@ -57,8 +57,10 @@ extern void hsqml_finalise_class_handle(HsQMLClassHandle* hndl);
 typedef char HsQMLObjectHandle;
 
 extern HsQMLObjectHandle* hsqml_create_object(void*, HsQMLClassHandle*);
+extern void* hsqml_allocate_context_object(HsQMLClassHandle*);
 
 extern void* hsqml_get_haskell(HsQMLObjectHandle*);
+extern void hsqml_set_haskell(void*, void*);
 
 extern void hsqml_emit_signal(void*, int, void**);
 

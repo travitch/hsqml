@@ -38,6 +38,9 @@ module Graphics.QML.Types.Classes (
   Marshallable(..),
   QPointer,
 
+  -- * Context Objects
+  allocateContextObject,
+
   -- * Methods
   defMethod,
 
@@ -51,6 +54,7 @@ module Graphics.QML.Types.Classes (
   -- * TH Helpers
   defClass,
   registerTypes,
+
 ) where
 
 import Graphics.QML.Internal.Core
@@ -471,6 +475,19 @@ methodParameters method =
 signalParameters :: Signal -> String
 signalParameters sig =
   replicate (flip (-) 1 $ length $ signalArgTypes sig) ','
+
+
+allocateContextObject :: forall a . (MetaObject a) => (QPointer -> a) -> IO a
+allocateContextObject partialObject = do
+  let mc :: MetaClass a
+      mc = metaClass
+
+  cobj <- withHsQMLClassHandle (classData mc) $ \h -> do
+    hsqmlAllocateContextObject h
+  let hobj = partialObject cobj
+  hobjSPtr <- newStablePtr hobj
+  hsqmlSetHaskell cobj (castStablePtrToPtr hobjSPtr)
+  return hobj
 
 -- TH Helpers
 
