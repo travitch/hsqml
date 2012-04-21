@@ -13,17 +13,16 @@ module Graphics.QML.Engine (
     initialURL,
     contextObject),
   defaultEngineConfig,
-  allocateContextObject,
   createEngine,
   runEngines
 ) where
 
 import Graphics.QML.Internal.Core
 import Graphics.QML.Internal.Engine
-import Graphics.QML.Types.Classes
+-- For the Marshallable instance of MetaObject
+import Graphics.QML.Types.Classes ()
 
 import Data.Maybe
-import Foreign.Marshal.Alloc ( mallocBytes )
 import Foreign.Storable
 import Network.URI (URI, nullURI, uriPath, uriToString)
 

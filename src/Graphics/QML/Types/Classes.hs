@@ -35,7 +35,6 @@ module Graphics.QML.Types.Classes (
   -- * Classes
   MetaObject (..),
   ClassDefinition(..),
-  Marshallable(..),
   QPointer,
 
   -- * Context Objects
@@ -193,11 +192,7 @@ createClass name (InternalClassDef _ _ properties methods signals _ _) = do
   return $ case hndl of
     Just hndl' -> MetaClass (TypeName name) hndl'
     Nothing    -> error "Failed to create QML class."
-splitOn :: (a -> Bool) -> [a] -> [[a]]
-splitOn _ [] = []
-splitOn f l@(x:xs)
-  | f x = splitOn f xs
-  | otherwise = let (h,t) = break f l in h:(splitOn f t)
+
 interleave :: [a] -> [a] -> [a]
 interleave [] ys = ys
 interleave (x:xs) ys = x : ys `interleave` xs
@@ -297,6 +292,7 @@ showMOC (MOCOutput arr str) =
     -- where each string starts.
     (_, _, strMap) = foldl' extractStrings (0, "", Map.empty) (zip ixs str)
 
+showMethods :: [Int] -> Map Int String -> Int -> Int -> String
 showMethods arr m ixN ixStart =
   concat $ showMethod m ints `debug` show ints
   where
@@ -313,8 +309,7 @@ showMethod m (sigN : paramsN : typeN : _ : flags : rest) =
     name = m Map.! fromIntegral sigN
     params = m Map.! fromIntegral paramsN
     ty = m Map.! fromIntegral typeN
-
-
+showMethod _ _ = error "Unexpected method arity"
 
 extractStrings :: (Integral a)
                   => (Int, String, Map Int String)
@@ -476,9 +471,24 @@ signalParameters :: Signal -> String
 signalParameters sig =
   replicate (flip (-) 1 $ length $ signalArgTypes sig) ','
 
-
+-- | This is a special helper to allocate the Context object for a QML
+-- program.  This is necessary because of the C++ wrapper object that
+-- needs to be assocated with each Haskell QML object.
+--
+-- For objects that are instantiated by the QML runtime system, this
+-- wrapper is automatically generated.  Since the context object is
+-- allocated in Haskell, this helper builds the wrapper.
+--
+-- To use it, feed it a QML object that is partially instantiated,
+-- lacking only the QPointer to its C++ wrapper object.
+--
+-- > ctx <- allocateContextObject $ HaskellType "foo" "bar"
+-- > createEngine $ defaultEngineConfig { contextObject = Just ctx }
+-- > runEngines
 allocateContextObject :: forall a . (MetaObject a) => (QPointer -> a) -> IO a
 allocateContextObject partialObject = do
+  -- Note that this function is defined here because it needs access
+  -- to the metaClass database, and that should not be exposed at all.
   let mc :: MetaClass a
       mc = metaClass
 
