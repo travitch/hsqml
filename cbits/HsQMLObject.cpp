@@ -170,3 +170,26 @@ extern "C" void hsqml_emit_signal(void* hndl, int signum, void **args)
   args[0] = NULL;
   QMetaObject::activate(obj, obj->metaObject(), signum, args);
 }
+
+
+
+/* List */
+extern "C" const int hsqml_list_size = sizeof(QVariantList);
+
+extern "C" void hsqml_init_list(HsQMLListHandle* hndl)
+{
+  new((void*)hndl) QVariantList();
+}
+
+extern "C" void hsqml_deinit_list(HsQMLListHandle *hndl)
+{
+  QVariantList* l = (QVariantList*)hndl;
+  l->~QVariantList();
+}
+
+extern "C" void hsqml_list_append(HsQMLListHandle *hndl, void *o)
+{
+  QObject *obj = (QObject*)o;
+  QVariantList* l = (QVariantList*)hndl;
+  l->append(qVariantFromValue(obj));
+}

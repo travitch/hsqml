@@ -69,6 +69,14 @@ extern void hsqml_register_type(HsQMLPlacementFunc, const char*,
     int, int, const char*, HsQMLClassHandle*);
 extern void hsqml_allocate_in_place(void*, void*, HsQMLClassHandle*);
 
+
+/* Lists */
+typedef char HsQMLListHandle;
+extern const int hsqml_list_size;
+extern void hsqml_init_list(HsQMLListHandle*);
+extern void hsqml_deinit_list(HsQMLListHandle*);
+extern void hsqml_list_append(HsQMLListHandle*, void*);
+
 #ifdef __cplusplus
 }
 #endif

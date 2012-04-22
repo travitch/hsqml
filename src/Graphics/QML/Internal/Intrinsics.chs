@@ -1,9 +1,7 @@
-{-# LANGUAGE
-    ForeignFunctionInterface
-  #-}
-
+{-# LANGUAGE ForeignFunctionInterface #-}
 module Graphics.QML.Internal.Intrinsics where
 
+import Data.Text as T
 import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Ptr
@@ -16,6 +14,7 @@ import System.IO.Unsafe
 
 cIntConv :: (Integral a, Integral b) => a -> b
 cIntConv = fromIntegral
+
 
 --
 -- String
@@ -36,9 +35,9 @@ hsqmlStringSize = fromIntegral $ unsafePerformIO $ peek hsqmlStringSizePtr
   {id `HsQMLStringHandle'} ->
   `()' #}
 
-hsqmlMarshalString :: String -> HsQMLStringHandle -> IO ()
-hsqmlMarshalString str hndl =
-  withCWStringLen str $ \(cStr, cStrLen) ->
+hsqmlMarshalString :: Text -> HsQMLStringHandle -> IO ()
+hsqmlMarshalString t hndl =
+  withCWStringLen (unpack t) $ \(cStr, cStrLen) ->
   hsqmlMarshalString_ cStr (cIntConv cStrLen) hndl >>= \res ->
   return ()
 
@@ -49,11 +48,12 @@ foreign import ccall unsafe "hsqml.h hsqml_marshal_string"
   {id `HsQMLStringHandle'} ->
   `Int' #}
 
-hsqmlUnmarshalString :: HsQMLStringHandle -> IO String
+hsqmlUnmarshalString :: HsQMLStringHandle -> IO Text
 hsqmlUnmarshalString hndl = do
   hsqmlUnmarshalStringMaxlen hndl >>= flip allocaArray (\cStr ->
-    hsqmlUnmarshalString_ hndl cStr >>= \cStrLen ->
-      peekCWStringLen (cStr, cIntConv cStrLen))
+    hsqmlUnmarshalString_ hndl cStr >>= \cStrLen -> do
+      s <- peekCWStringLen (cStr, cIntConv cStrLen)
+      return (pack s))
 
 foreign import ccall unsafe "hsqml.h hsqml_unmarshal_string"
   hsqmlUnmarshalString_ :: HsQMLStringHandle -> Ptr CWchar -> IO CInt
@@ -92,7 +92,7 @@ hsqmlMarshalUrl str url =
   allocaBytes hsqmlStringSize $ \hndlPtr -> do
     let hndl = HsQMLStringHandle hndlPtr
     hsqmlInitString hndl
-    hsqmlMarshalString str hndl
+    hsqmlMarshalString (pack str) hndl
     hsqmlStringToUrl hndl url
     hsqmlDeinitString hndl
 
@@ -104,4 +104,4 @@ hsqmlUnmarshalUrl url =
     hsqmlUrlToString url hndl
     str <- hsqmlUnmarshalString hndl
     hsqmlDeinitString hndl
-    return str
+    return (unpack str)

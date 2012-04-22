@@ -3,8 +3,8 @@
 
 #include <QString>
 #include <QUrl>
-
 #include "hsqml.h"
+
 
 /* String */
 extern "C" const int hsqml_string_size = sizeof(QString);

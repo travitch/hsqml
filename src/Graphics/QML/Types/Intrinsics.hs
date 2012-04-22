@@ -5,9 +5,11 @@ module Graphics.QML.Types.Intrinsics (
 ) where
 
 import Graphics.QML.Internal.Core
+import Graphics.QML.Internal.Classes
 import Graphics.QML.Internal.Intrinsics
 
 import Data.Maybe
+import Data.Text ( Text )
 import Foreign.C.Types
 import Foreign.Ptr
 import Foreign.Storable
@@ -37,7 +39,7 @@ instance Marshallable Int where
 -- String/QString built-in type
 --
 
-instance Marshallable String where
+instance Marshallable Text where
   marshal ptr str = hsqmlMarshalString str (HsQMLStringHandle $ castPtr ptr)
   unmarshal ptr = hsqmlUnmarshalString (HsQMLStringHandle $ castPtr ptr)
   mSizeOf _ = hsqmlStringSize
@@ -55,3 +57,9 @@ instance Marshallable URI where
       return . fromJust . parseURIReference
   mSizeOf _ = hsqmlUrlSize
   mTypeOf _ = TypeName "QUrl"
+
+instance (MetaObject t) => Marshallable [t] where
+  marshal ptr lst = hsqmlMarshalList lst (HsQMLListHandle $ castPtr ptr)
+  unmarshal ptr = hsqmlUnmarshalList (HsQMLListHandle $ castPtr ptr)
+  mSizeOf _ = hsqmlListSize
+  mTypeOf _ = TypeName "QVariantList"

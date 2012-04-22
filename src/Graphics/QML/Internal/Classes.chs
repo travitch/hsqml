@@ -9,6 +9,8 @@ import Foreign.C.Types
 import Foreign.Ptr
 import Foreign.ForeignPtr
 import Foreign.StablePtr
+import Foreign.Storable
+import System.IO.Unsafe
 
 import Graphics.QML.Internal.Core
 
@@ -87,6 +89,31 @@ ptrToObj =
 
 {#fun hsqml_allocate_context_object as ^
   {id `Ptr HsQMLClassHandle'} -> `Ptr ()' id #}
+
+
+
+
+{#pointer *HsQMLListHandle as ^ newtype #}
+
+foreign import ccall "hsqml.h &hsqml_list_size"
+  hsqmlListSizePtr :: Ptr CInt
+hsqmlListSize :: Int
+hsqmlListSize = fromIntegral $ unsafePerformIO $ peek hsqmlListSizePtr
+
+{#fun unsafe hsqml_init_list as ^
+  {id `HsQMLListHandle'} -> `()' #}
+{#fun unsafe hsqml_deinit_list as ^
+  {id `HsQMLListHandle'} -> `()' #}
+{#fun unsafe hsqml_list_append as ^
+  {id `HsQMLListHandle', id `Ptr ()'} -> `()' #}
+
+-- hsqmlMarshalList ::
+hsqmlMarshalList lst hdl = do
+  mapM_ (addElt hdl) lst
+  where
+    addElt h o = objToPtr o (hsqmlListAppend h)
+
+hsqmlUnmarshalList hdl = undefined
 
 ofDynamicMetaObject :: CUInt
 ofDynamicMetaObject = 0x01
