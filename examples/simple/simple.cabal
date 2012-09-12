@@ -1,0 +1,14 @@
+Name:                simple
+Version:             0.1
+License:             BSD3
+License-file:        LICENSE
+Author:              Tristan Ravitch
+Category:            Graphics
+Build-type:          Simple
+Cabal-version:       >=1.2
+
+
+Executable simple-qml-example
+  Main-is: Main.hs
+  Build-depends: base > 3 && < 5, hsqml, network, text
+  ghc-options: -ddump-splices -rtsopts
